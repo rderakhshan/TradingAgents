@@ -953,6 +953,10 @@
   <button class="tab-btn" data-tab="beginner">What is TradingAgents?</button>
   <button class="tab-btn" data-tab="tools">Tools Deep Dive</button>
   <button class="tab-btn" data-tab="llm-map">LLM Provider Map</button>
+  <button class="tab-btn" data-tab="state-schema">Agent State Schema</button>
+  <button class="tab-btn" data-tab="graph-orchestration">LangGraph Orchestration</button>
+  <button class="tab-btn" data-tab="memevolve">MemEvolve Pipeline</button>
+  <button class="tab-btn" data-tab="vendor-routing">Data Vendor Routing</button>
 </div>
 
 <!-- TAB 1: System Overview -->
@@ -2328,6 +2332,864 @@
     </div>
   </div>
 </div>
+
+<!-- TAB 10: Agent State Schema -->
+<div class="tab-content light-tab" id="tab-state-schema">
+  <div class="light-section">
+    <h2 class="light-title">AgentState Schema &mdash; The Shared Brain</h2>
+    <p class="light-intro">Every agent reads from and writes to a single shared state object. This TypedDict extends LangGraph's <code>MessagesState</code> with domain-specific fields that flow through the entire pipeline.</p>
+
+    <div class="schema-visual">
+      <svg viewBox="0 0 1100 820" xmlns="http://www.w3.org/2000/svg" class="schema-svg">
+        <defs>
+          <linearGradient id="stateGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#f0f7ff;stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:#e8f0fe;stop-opacity:1"/>
+          </linearGradient>
+          <linearGradient id="fieldGrad1" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:#f8fafc;stop-opacity:1"/>
+          </linearGradient>
+          <filter id="shadow1">
+            <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.08"/>
+          </filter>
+          <filter id="shadow2">
+            <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.12"/>
+          </filter>
+          <marker id="s-arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#64748b"/>
+          </marker>
+          <marker id="s-arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#2563eb"/>
+          </marker>
+        </defs>
+
+        <!-- Main State Container -->
+        <rect x="20" y="20" width="1060" height="780" rx="16" fill="url(#stateGrad)" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow2)"/>
+        <text x="550" y="52" text-anchor="middle" fill="#0f172a" font-size="16" font-weight="700" font-family="'Georgia', serif">AgentState</text>
+        <text x="550" y="72" text-anchor="middle" fill="#64748b" font-size="11">extends MessagesState (LangGraph)</text>
+
+        <!-- Core Fields Row -->
+        <g transform="translate(40, 95)">
+          <rect width="320" height="120" rx="10" fill="url(#fieldGrad1)" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow1)"/>
+          <rect width="4" height="120" rx="2" fill="#2563eb"/>
+          <text x="20" y="25" fill="#2563eb" font-size="10" font-weight="700" text-transform="uppercase" letter-spacing="0.08em">CORE IDENTIFIERS</text>
+          <text x="20" y="50" fill="#0f172a" font-size="13" font-weight="600">company_of_interest: str</text>
+          <text x="20" y="68" fill="#64748b" font-size="11">Ticker being analyzed (e.g., "NVDA")</text>
+          <text x="20" y="90" fill="#0f172a" font-size="13" font-weight="600">trade_date: str</text>
+          <text x="20" y="108" fill="#64748b" font-size="11">Analysis date in yyyy-mm-dd format</text>
+        </g>
+
+        <g transform="translate(380, 95)">
+          <rect width="320" height="120" rx="10" fill="url(#fieldGrad1)" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow1)"/>
+          <rect width="4" height="120" rx="2" fill="#7c3aed"/>
+          <text x="20" y="25" fill="#7c3aed" font-size="10" font-weight="700" text-transform="uppercase" letter-spacing="0.08em">MESSAGE HISTORY</text>
+          <text x="20" y="50" fill="#0f172a" font-size="13" font-weight="600">messages: List[BaseMessage]</text>
+          <text x="20" y="68" fill="#64748b" font-size="11">Inherited from MessagesState</text>
+          <text x="20" y="90" fill="#0f172a" font-size="13" font-weight="600">sender: str</text>
+          <text x="20" y="108" fill="#64748b" font-size="11">Last agent to write to state</text>
+        </g>
+
+        <g transform="translate(720, 95)">
+          <rect width="320" height="120" rx="10" fill="url(#fieldGrad1)" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow1)"/>
+          <rect width="4" height="120" rx="2" fill="#059669"/>
+          <text x="20" y="25" fill="#059669" font-size="10" font-weight="700" text-transform="uppercase" letter-spacing="0.08em">MEMORY CONTEXT</text>
+          <text x="20" y="50" fill="#0f172a" font-size="13" font-weight="600">past_context: str</text>
+          <text x="20" y="68" fill="#64748b" font-size="11">Injected at run start: last 5 same-ticker</text>
+          <text x="20" y="86" fill="#64748b" font-size="11">decisions + 3 cross-ticker lessons</text>
+          <text x="20" y="108" fill="#64748b" font-size="10" font-style="italic">Populated by TradingMemoryLog</text>
+        </g>
+
+        <!-- Analyst Reports Row -->
+        <text x="550" y="245" text-anchor="middle" fill="#475569" font-size="12" font-weight="600" letter-spacing="0.05em">PHASE I: ANALYST REPORTS (written sequentially)</text>
+        <line x1="40" y1="255" x2="1060" y2="255" stroke="#e2e8f0" stroke-width="1"/>
+
+        <g transform="translate(40, 270)">
+          <rect width="240" height="90" rx="8" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+          <text x="15" y="25" fill="#1d4ed8" font-size="11" font-weight="700">&#x1F4C8; market_report: str</text>
+          <text x="15" y="45" fill="#64748b" font-size="10">Technical analysis with indicators</text>
+          <text x="15" y="60" fill="#64748b" font-size="10">Trend direction, actionable insights</text>
+          <text x="15" y="80" fill="#94a3b8" font-size="9">Written by: Market Analyst</text>
+        </g>
+
+        <g transform="translate(295, 270)">
+          <rect width="240" height="90" rx="8" fill="#ecfeff" stroke="#a5f3fc" stroke-width="1"/>
+          <text x="15" y="25" fill="#0891b2" font-size="11" font-weight="700">&#x1F4E2; sentiment_report: str</text>
+          <text x="15" y="45" fill="#64748b" font-size="10">Cross-source sentiment analysis</text>
+          <text x="15" y="60" fill="#64748b" font-size="10">Bullish/Bearish/Neutral/Mixed</text>
+          <text x="15" y="80" fill="#94a3b8" font-size="9">Written by: Sentiment Analyst</text>
+        </g>
+
+        <g transform="translate(550, 270)">
+          <rect width="240" height="90" rx="8" fill="#f5f3ff" stroke="#ddd6fe" stroke-width="1"/>
+          <text x="15" y="25" fill="#7c3aed" font-size="11" font-weight="700">&#x1F310; news_report: str</text>
+          <text x="15" y="45" fill="#64748b" font-size="10">Macro + company news research</text>
+          <text x="15" y="60" fill="#64748b" font-size="10">Fed rates, geopolitics, commodities</text>
+          <text x="15" y="80" fill="#94a3b8" font-size="9">Written by: News Analyst</text>
+        </g>
+
+        <g transform="translate(805, 270)">
+          <rect width="240" height="90" rx="8" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+          <text x="15" y="25" fill="#059669" font-size="11" font-weight="700">&#x1F4CA; fundamentals_report: str</text>
+          <text x="15" y="45" fill="#64748b" font-size="10">Company financial health analysis</text>
+          <text x="15" y="60" fill="#64748b" font-size="10">Balance sheet, cash flow, insider data</text>
+          <text x="15" y="80" fill="#94a3b8" font-size="9">Written by: Fundamentals Analyst</text>
+        </g>
+
+        <!-- Debate States -->
+        <text x="550" y="395" text-anchor="middle" fill="#475569" font-size="12" font-weight="600" letter-spacing="0.05em">PHASE II &amp; IV: DEBATE STATE CONTAINERS</text>
+        <line x1="40" y1="405" x2="1060" y2="405" stroke="#e2e8f0" stroke-width="1"/>
+
+        <g transform="translate(40, 420)">
+          <rect width="500" height="130" rx="10" fill="#faf5ff" stroke="#e9d5ff" stroke-width="1.5"/>
+          <text x="20" y="25" fill="#7c3aed" font-size="12" font-weight="700">investment_debate_state: InvestDebateState</text>
+          <text x="20" y="48" fill="#64748b" font-size="10">Nested state object for Bull vs Bear debate:</text>
+          <text x="35" y="68" fill="#0f172a" font-size="11" font-family="monospace">history: List[str]</text>
+          <text x="35" y="86" fill="#64748b" font-size="10">Accumulated arguments from both sides</text>
+          <text x="35" y="106" fill="#0f172a" font-size="11" font-family="monospace">count: int</text>
+          <text x="35" y="124" fill="#64748b" font-size="10">Number of debate turns (triggers judge at limit)</text>
+        </g>
+
+        <g transform="translate(560, 420)">
+          <rect width="480" height="130" rx="10" fill="#fdf2f8" stroke="#fbcfe8" stroke-width="1.5"/>
+          <text x="20" y="25" fill="#db2777" font-size="12" font-weight="700">risk_debate_state: RiskDebateState</text>
+          <text x="20" y="48" fill="#64748b" font-size="10">Nested state object for 3-way risk debate:</text>
+          <text x="35" y="68" fill="#0f172a" font-size="11" font-family="monospace">history: List[str]</text>
+          <text x="35" y="86" fill="#64748b" font-size="10">Aggressive &#x2192; Conservative &#x2192; Neutral cycle</text>
+          <text x="35" y="106" fill="#0f172a" font-size="11" font-family="monospace">count: int</text>
+          <text x="35" y="124" fill="#64748b" font-size="10">Number of risk turns (3 &#x00D7; max_risk_discuss_rounds)</text>
+        </g>
+
+        <!-- Decision Outputs -->
+        <text x="550" y="585" text-anchor="middle" fill="#475569" font-size="12" font-weight="600" letter-spacing="0.05em">PHASE III &amp; V: DECISION OUTPUTS (Structured Pydantic Schemas)</text>
+        <line x1="40" y1="595" x2="1060" y2="595" stroke="#e2e8f0" stroke-width="1"/>
+
+        <g transform="translate(40, 610)">
+          <rect width="320" height="170" rx="10" fill="#fffbeb" stroke="#fde68a" stroke-width="1.5"/>
+          <text x="20" y="25" fill="#d97706" font-size="12" font-weight="700">investment_plan: str</text>
+          <text x="20" y="45" fill="#64748b" font-size="10">Research Manager's verdict (ResearchPlan)</text>
+          <text x="20" y="65" fill="#0f172a" font-size="11" font-family="monospace">recommendation: 5-tier rating</text>
+          <text x="20" y="83" fill="#0f172a" font-size="11" font-family="monospace">rationale: str</text>
+          <text x="20" y="101" fill="#0f172a" font-size="11" font-family="monospace">strategic_actions: List[str]</text>
+          <text x="20" y="125" fill="#94a3b8" font-size="9">Output: ResearchPlan (Pydantic)</text>
+          <text x="20" y="142" fill="#94a3b8" font-size="9">LLM: Deep Think (gpt-5.4)</text>
+          <text x="20" y="159" fill="#94a3b8" font-size="9">Fallback: free-text if schema fails</text>
+        </g>
+
+        <g transform="translate(380, 610)">
+          <rect width="320" height="170" rx="10" fill="#fef3c7" stroke="#fcd34d" stroke-width="1.5"/>
+          <text x="20" y="25" fill="#b45309" font-size="12" font-weight="700">trader_investment_plan: str</text>
+          <text x="20" y="45" fill="#64748b" font-size="10">Trader's concrete proposal (TraderProposal)</text>
+          <text x="20" y="65" fill="#0f172a" font-size="11" font-family="monospace">action: Buy | Hold | Sell</text>
+          <text x="20" y="83" fill="#0f172a" font-size="11" font-family="monospace">reasoning: str</text>
+          <text x="20" y="101" fill="#0f172a" font-size="11" font-family="monospace">entry_price: float</text>
+          <text x="20" y="119" fill="#0f172a" font-size="11" font-family="monospace">stop_loss: float</text>
+          <text x="20" y="137" fill="#0f172a" font-size="11" font-family="monospace">position_sizing: str</text>
+          <text x="20" y="159" fill="#94a3b8" font-size="9">Output: TraderProposal (Pydantic)</text>
+        </g>
+
+        <g transform="translate(720, 610)">
+          <rect width="320" height="170" rx="10" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="2"/>
+          <text x="20" y="25" fill="#059669" font-size="12" font-weight="700">&#x2B50; final_trade_decision: str</text>
+          <text x="20" y="45" fill="#64748b" font-size="10">Portfolio Manager's final call (PortfolioDecision)</text>
+          <text x="20" y="65" fill="#0f172a" font-size="11" font-family="monospace">rating: 5-tier scale</text>
+          <text x="20" y="83" fill="#0f172a" font-size="11" font-family="monospace">executive_summary: str</text>
+          <text x="20" y="101" fill="#0f172a" font-size="11" font-family="monospace">investment_thesis: str</text>
+          <text x="20" y="119" fill="#0f172a" font-size="11" font-family="monospace">price_target: float</text>
+          <text x="20" y="137" fill="#0f172a" font-size="11" font-family="monospace">time_horizon: str</text>
+          <text x="20" y="159" fill="#94a3b8" font-size="9">Output: PortfolioDecision (Pydantic)</text>
+        </g>
+
+      </svg>
+    </div>
+
+    <div class="light-note">
+      <strong>Key Insight:</strong> The state is immutable between nodes &mdash; each agent produces a new state snapshot. LangGraph's <code>MessagesState</code> parent class automatically accumulates the full conversation history, enabling debate agents to read prior arguments.
+    </div>
+  </div>
+</div>
+
+<!-- TAB 11: LangGraph Orchestration -->
+<div class="tab-content light-tab" id="tab-graph-orchestration">
+  <div class="light-section">
+    <h2 class="light-title">LangGraph StateGraph Orchestration</h2>
+    <p class="light-intro">The entire trading pipeline is a directed graph with conditional edges, built using LangGraph's <code>StateGraph</code>. Nodes are agent invocations; edges encode the execution flow with conditional branching for tool loops and debate cycles.</p>
+
+    <div class="orchestration-visual">
+      <svg viewBox="0 0 1200 1050" xmlns="http://www.w3.org/2000/svg" class="orch-svg">
+        <defs>
+          <linearGradient id="orchBg" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#fafbff;stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:#f0f4ff;stop-opacity:1"/>
+          </linearGradient>
+          <filter id="orchShadow">
+            <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.1"/>
+          </filter>
+          <marker id="o-arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+          </marker>
+          <marker id="o-arrow-blue" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+          </marker>
+          <marker id="o-arrow-purple" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#7c3aed"/>
+          </marker>
+          <marker id="o-arrow-green" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#059669"/>
+          </marker>
+          <marker id="o-arrow-orange" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#d97706"/>
+          </marker>
+          <marker id="o-arrow-red" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#dc2626"/>
+          </marker>
+        </defs>
+
+        <!-- Background -->
+        <rect x="0" y="0" width="1200" height="1050" rx="16" fill="url(#orchBg)" stroke="#e2e8f0" stroke-width="1.5"/>
+
+        <!-- Phase labels -->
+        <text x="600" y="35" text-anchor="middle" fill="#0f172a" font-size="18" font-weight="700" font-family="'Georgia', serif">LangGraph Execution Graph</text>
+        <text x="600" y="55" text-anchor="middle" fill="#64748b" font-size="12">StateGraph with conditional edges &bull; 13 nodes &bull; 2 debate loops &bull; 3 tool subgraphs</text>
+
+        <!-- START -->
+        <rect x="530" y="75" width="140" height="36" rx="18" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" filter="url(#orchShadow)"/>
+        <text x="600" y="98" text-anchor="middle" fill="#0f172a" font-size="12" font-weight="700">START</text>
+        <line x1="600" y1="111" x2="600" y2="140" stroke="#475569" stroke-width="1.5" marker-end="url(#o-arrow)"/>
+
+        <!-- PHASE I: Analysts -->
+        <rect x="30" y="145" width="1140" height="300" rx="12" fill="none" stroke="#bfdbfe" stroke-width="1.5" stroke-dasharray="6,3"/>
+        <text x="600" y="168" text-anchor="middle" fill="#2563eb" font-size="11" font-weight="700" letter-spacing="0.08em">PHASE I: ANALYST SEQUENCE (4 nodes + 3 tool subgraphs + 3 Msg Clear nodes)</text>
+
+        <!-- Market Analyst -->
+        <rect x="100" y="185" width="200" height="50" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5" filter="url(#orchShadow)"/>
+        <text x="200" y="207" text-anchor="middle" fill="#1d4ed8" font-size="12" font-weight="600">Market Analyst</text>
+        <text x="200" y="225" text-anchor="middle" fill="#64748b" font-size="9">Tool-calling enabled</text>
+
+        <!-- Tool loop -->
+        <rect x="340" y="190" width="100" height="40" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="390" y="214" text-anchor="middle" fill="#64748b" font-size="10">tools_market</text>
+        <path d="M300 210 Q320 190 340 210" fill="none" stroke="#94a3b8" stroke-width="1" marker-end="url(#o-arrow)"/>
+        <path d="M340 230 Q320 250 300 230" fill="none" stroke="#94a3b8" stroke-width="1" marker-end="url(#o-arrow)"/>
+
+        <!-- Msg Clear -->
+        <rect x="480" y="190" width="100" height="40" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
+        <text x="530" y="214" text-anchor="middle" fill="#64748b" font-size="10">Msg Clear 1</text>
+
+        <!-- Arrows between analysts -->
+        <line x1="580" y1="210" x2="620" y2="210" stroke="#2563eb" stroke-width="1.5" marker-end="url(#o-arrow-blue)"/>
+
+        <!-- Sentiment Analyst -->
+        <rect x="620" y="185" width="200" height="50" rx="8" fill="#ecfeff" stroke="#0891b2" stroke-width="1.5" filter="url(#orchShadow)"/>
+        <text x="720" y="207" text-anchor="middle" fill="#0e7490" font-size="12" font-weight="600">Sentiment Analyst</text>
+        <text x="720" y="225" text-anchor="middle" fill="#64748b" font-size="9">No tools (pre-fetched)</text>
+
+        <line x1="820" y1="210" x2="860" y2="210" stroke="#0891b2" stroke-width="1.5" marker-end="url(#o-arrow-blue)"/>
+
+        <!-- Msg Clear 2 -->
+        <rect x="860" y="190" width="100" height="40" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
+        <text x="910" y="214" text-anchor="middle" fill="#64748b" font-size="10">Msg Clear 2</text>
+
+        <line x1="960" y1="210" x2="1000" y2="210" stroke="#2563eb" stroke-width="1.5" marker-end="url(#o-arrow-blue)"/>
+
+        <!-- News Analyst -->
+        <rect x="1000" y="185" width="160" height="50" rx="8" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5" filter="url(#orchShadow)"/>
+        <text x="1080" y="207" text-anchor="middle" fill="#6d28d9" font-size="12" font-weight="600">News Analyst</text>
+        <text x="1080" y="225" text-anchor="middle" fill="#64748b" font-size="9">Tool-calling enabled</text>
+
+        <!-- News tool loop -->
+        <rect x="1000" y="250" width="160" height="35" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="1080" y="272" text-anchor="middle" fill="#64748b" font-size="10">tools_news</text>
+
+        <line x1="1080" y1="235" x2="1080" y2="250" stroke="#94a3b8" stroke-width="1" marker-end="url(#o-arrow)"/>
+        <line x1="1080" y1="285" x2="1080" y2="310" stroke="#94748b" stroke-width="1" marker-end="url(#o-arrow)"/>
+
+        <!-- Msg Clear 3 -->
+        <rect x="1000" y="310" width="160" height="35" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
+        <text x="1080" y="332" text-anchor="middle" fill="#64748b" font-size="10">Msg Clear 3</text>
+
+        <!-- Down to Fundamentals -->
+        <line x1="1080" y1="345" x2="1080" y2="370" stroke="#2563eb" stroke-width="1.5" marker-end="url(#o-arrow-blue)"/>
+
+        <!-- Fundamentals Analyst -->
+        <rect x="980" y="370" width="200" height="50" rx="8" fill="#f0fdf4" stroke="#059669" stroke-width="1.5" filter="url(#orchShadow)"/>
+        <text x="1080" y="392" text-anchor="middle" fill="#047857" font-size="12" font-weight="600">Fundamentals Analyst</text>
+        <text x="1080" y="410" text-anchor="middle" fill="#64748b" font-size="9">Tool-calling enabled</text>
+
+        <!-- Fundamentals tool loop -->
+        <rect x="980" y="430" width="200" height="35" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="1080" y="452" text-anchor="middle" fill="#64748b" font-size="10">tools_fundamentals</text>
+
+        <!-- Arrow down to Phase II -->
+        <line x1="1080" y1="420" x2="1080" y2="470" stroke="#2563eb" stroke-width="1.5" marker-end="url(#o-arrow-blue)"/>
+        <line x1="1080" y1="470" x2="600" y2="470" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#o-arrow-purple)"/>
+
+        <!-- PHASE II: Investment Debate -->
+        <rect x="30" y="480" width="1140" height="180" rx="12" fill="none" stroke="#e9d5ff" stroke-width="1.5" stroke-dasharray="6,3"/>
+        <text x="600" y="503" text-anchor="middle" fill="#7c3aed" font-size="11" font-weight="700" letter-spacing="0.08em">PHASE II: INVESTMENT DEBATE (conditional loop: Bull &#x2194; Bear &#x2192; Research Manager)</text>
+
+        <!-- Bull -->
+        <rect x="200" y="520" width="180" height="45" rx="8" fill="#f0fdf4" stroke="#059669" stroke-width="1.5"/>
+        <text x="290" y="547" text-anchor="middle" fill="#047857" font-size="12" font-weight="600">Bull Researcher</text>
+
+        <!-- Bear -->
+        <rect x="520" y="520" width="180" height="45" rx="8" fill="#fef2f2" stroke="#dc2626" stroke-width="1.5"/>
+        <text x="610" y="547" text-anchor="middle" fill="#b91c1c" font-size="12" font-weight="600">Bear Researcher</text>
+
+        <!-- Debate arrows -->
+        <path d="M380 542 Q450 520 520 542" fill="none" stroke="#dc2626" stroke-width="1.5" marker-end="url(#o-arrow-red)"/>
+        <path d="M520 555 Q450 575 380 555" fill="none" stroke="#059669" stroke-width="1.5" marker-end="url(#o-arrow-green)"/>
+
+        <!-- Loop label -->
+        <text x="450" y="590" text-anchor="middle" fill="#dc2626" font-size="10" font-style="italic">count &lt; 2&#x00D7;max_debate_rounds</text>
+
+        <!-- Research Manager -->
+        <rect x="800" y="520" width="220" height="45" rx="8" fill="#faf5ff" stroke="#7c3aed" stroke-width="2" filter="url(#orchShadow)"/>
+        <text x="910" y="540" text-anchor="middle" fill="#6d28d9" font-size="12" font-weight="700">Research Manager</text>
+        <text x="910" y="557" text-anchor="middle" fill="#64748b" font-size="9">Deep Think LLM &#x2022; ResearchPlan</text>
+
+        <!-- Arrow from debate to manager -->
+        <line x1="700" y1="542" x2="800" y2="542" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#o-arrow-purple)"/>
+        <text x="750" y="535" text-anchor="middle" fill="#7c3aed" font-size="9">count &#x2265; limit</text>
+
+        <!-- Arrow down to Trader -->
+        <line x1="910" y1="565" x2="910" y2="680" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#o-arrow-purple)"/>
+
+        <!-- PHASE III: Trader -->
+        <rect x="30" y="670" width="1140" height="80" rx="12" fill="none" stroke="#fde68a" stroke-width="1.5" stroke-dasharray="6,3"/>
+        <text x="600" y="693" text-anchor="middle" fill="#b45309" font-size="11" font-weight="700" letter-spacing="0.08em">PHASE III: TRADER (single node)</text>
+
+        <rect x="780" y="705" width="260" height="45" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="2" filter="url(#orchShadow)"/>
+        <text x="910" y="725" text-anchor="middle" fill="#b45309" font-size="12" font-weight="700">Trader</text>
+        <text x="910" y="742" text-anchor="middle" fill="#64748b" font-size="9">Quick Think LLM &#x2022; TraderProposal</text>
+
+        <!-- Arrow down to Phase IV -->
+        <line x1="910" y1="750" x2="910" y2="780" stroke="#d97706" stroke-width="1.5" marker-end="url(#o-arrow-orange)"/>
+
+        <!-- PHASE IV: Risk Debate -->
+        <rect x="30" y="785" width="1140" height="170" rx="12" fill="none" stroke="#fbcfe8" stroke-width="1.5" stroke-dasharray="6,3"/>
+        <text x="600" y="808" text-anchor="middle" fill="#db2777" font-size="11" font-weight="700" letter-spacing="0.08em">PHASE IV: RISK DEBATE (conditional cycle: Aggressive &#x2192; Conservative &#x2192; Neutral &#x2192; Portfolio Manager)</text>
+
+        <!-- Aggressive -->
+        <rect x="150" y="825" width="180" height="40" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+        <text x="240" y="850" text-anchor="middle" fill="#b45309" font-size="11" font-weight="600">Aggressive Analyst</text>
+
+        <!-- Conservative -->
+        <rect x="400" y="825" width="180" height="40" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="490" y="850" text-anchor="middle" fill="#1d4ed8" font-size="11" font-weight="600">Conservative Analyst</text>
+
+        <!-- Neutral -->
+        <rect x="650" y="825" width="180" height="40" rx="8" fill="#ecfeff" stroke="#0891b2" stroke-width="1.5"/>
+        <text x="740" y="850" text-anchor="middle" fill="#0e7490" font-size="11" font-weight="600">Neutral Analyst</text>
+
+        <!-- Cycle arrows -->
+        <line x1="330" y1="845" x2="400" y2="845" stroke="#2563eb" stroke-width="1.5" marker-end="url(#o-arrow-blue)"/>
+        <line x1="580" y1="845" x2="650" y2="845" stroke="#0891b2" stroke-width="1.5" marker-end="url(#o-arrow-blue)"/>
+        <!-- Cycle back -->
+        <path d="M240 865 Q150 900 240 935 Q330 970 490 935 Q580 900 490 865" fill="none" stroke="#d97706" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#o-arrow-orange)"/>
+        <path d="M490 865 Q580 900 740 935 Q830 900 740 865" fill="none" stroke="#0891b2" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#o-arrow-blue)"/>
+
+        <text x="450" y="950" text-anchor="middle" fill="#dc2626" font-size="10" font-style="italic">count &lt; 3&#x00D7;max_risk_discuss_rounds</text>
+
+        <!-- Portfolio Manager -->
+        <rect x="900" y="825" width="240" height="50" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="2.5" filter="url(#orchShadow)"/>
+        <text x="1020" y="847" text-anchor="middle" fill="#047857" font-size="13" font-weight="700">Portfolio Manager</text>
+        <text x="1020" y="865" text-anchor="middle" fill="#64748b" font-size="9">Deep Think &#x2022; PortfolioDecision &#x2022; Memory</text>
+
+        <!-- Arrow from risk debate to PM -->
+        <line x1="830" y1="845" x2="900" y2="845" stroke="#059669" stroke-width="1.5" marker-end="url(#o-arrow-green)"/>
+        <text x="865" y="838" text-anchor="middle" fill="#059669" font-size="9">count &#x2265; limit</text>
+
+        <!-- END -->
+        <line x1="1020" y1="875" x2="1020" y2="920" stroke="#059669" stroke-width="1.5" marker-end="url(#o-arrow-green)"/>
+        <rect x="950" y="920" width="140" height="36" rx="18" fill="#ffffff" stroke="#059669" stroke-width="1.5" filter="url(#orchShadow)"/>
+        <text x="1020" y="943" text-anchor="middle" fill="#047857" font-size="12" font-weight="700">END</text>
+
+        <!-- Side annotations -->
+        <!-- Conditional Logic Box -->
+        <rect x="30" y="970" width="560" height="65" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+        <text x="310" y="990" text-anchor="middle" fill="#475569" font-size="10" font-weight="700">CONDITIONAL EDGE LOGIC (conditional_logic.py)</text>
+        <text x="310" y="1010" text-anchor="middle" fill="#64748b" font-size="10">Analyst: tool_calls &#x2192; tools_node | no tool_calls &#x2192; Msg Clear &#x2192; next analyst</text>
+        <text x="310" y="1027" text-anchor="middle" fill="#64748b" font-size="10">Debate: count &lt; limit &#x2192; next debater | count &#x2265; limit &#x2192; Manager/Judge</text>
+
+        <!-- Memory Injection Box -->
+        <rect x="610" y="970" width="560" height="65" rx="8" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+        <text x="890" y="990" text-anchor="middle" fill="#059669" font-size="10" font-weight="700">MEMORY INJECTION (propagation.py)</text>
+        <text x="890" y="1010" text-anchor="middle" fill="#64748b" font-size="10">past_context injected at run start via get_past_context(ticker, n_same=5, n_cross=3)</text>
+        <text x="890" y="1027" text-anchor="middle" fill="#64748b" font-size="10">Decision appended to memory log after propagate() completes</text>
+
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- TAB 12: MemEvolve Pipeline -->
+<div class="tab-content light-tab" id="tab-memevolve">
+  <div class="light-section">
+    <h2 class="light-title">MemEvolve &mdash; Memory Evolution Pipeline</h2>
+    <p class="light-intro">TradingAgents doesn't just make decisions &mdash; it learns from them. The MemEvolve pipeline transforms raw trade outcomes into transferable lessons, enabling the Portfolio Manager to improve over time through reflective feedback loops.</p>
+
+    <div class="memevolve-visual">
+      <svg viewBox="0 0 1150 700" xmlns="http://www.w3.org/2000/svg" class="memevolve-svg">
+        <defs>
+          <linearGradient id="memBg" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#fafbff;stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:#f5f3ff;stop-opacity:1"/>
+          </linearGradient>
+          <linearGradient id="memPhase1" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" style="stop-color:#dbeafe;stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:#bfdbfe;stop-opacity:1"/>
+          </linearGradient>
+          <linearGradient id="memPhase2" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" style="stop-color:#ede9fe;stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:#ddd6fe;stop-opacity:1"/>
+          </linearGradient>
+          <linearGradient id="memPhase3" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" style="stop-color:#d1fae5;stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:#a7f3d0;stop-opacity:1"/>
+          </linearGradient>
+          <filter id="memShadow">
+            <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#0f172a" flood-opacity="0.08"/>
+          </filter>
+          <marker id="m-arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+          </marker>
+          <marker id="m-arrow-blue" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+          </marker>
+          <marker id="m-arrow-purple" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#7c3aed"/>
+          </marker>
+          <marker id="m-arrow-green" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#059669"/>
+          </marker>
+        </defs>
+
+        <!-- Background -->
+        <rect x="0" y="0" width="1150" height="700" rx="16" fill="url(#memBg)" stroke="#e2e8f0" stroke-width="1.5"/>
+
+        <text x="575" y="35" text-anchor="middle" fill="#0f172a" font-size="18" font-weight="700" font-family="'Georgia', serif">MemEvolve: Cross-Session Learning Pipeline</text>
+        <text x="575" y="55" text-anchor="middle" fill="#64748b" font-size="12">File-based append-only memory &#x2022; Deferred reflection &#x2022; Transferable lessons</text>
+
+        <!-- Phase A: Store Decision -->
+        <rect x="30" y="80" width="340" height="240" rx="12" fill="url(#memPhase1)" stroke="#93c5fd" stroke-width="1.5" filter="url(#memShadow)"/>
+        <text x="200" y="108" text-anchor="middle" fill="#1d4ed8" font-size="13" font-weight="700">PHASE A: Store Decision</text>
+        <text x="200" y="125" text-anchor="middle" fill="#64748b" font-size="10">(End of each propagate() call)</text>
+
+        <!-- Step A1 -->
+        <rect x="50" y="140" width="300" height="70" rx="8" fill="#ffffff" stroke="#bfdbfe" stroke-width="1"/>
+        <text x="65" y="160" fill="#0f172a" font-size="11" font-weight="600">1. Portfolio Manager decision captured</text>
+        <text x="65" y="178" fill="#64748b" font-size="10">Rating, thesis, price target, time horizon</text>
+        <text x="65" y="196" fill="#64748b" font-size="10">+ ticker symbol + analysis date</text>
+
+        <!-- Arrow -->
+        <line x1="200" y1="210" x2="200" y2="235" stroke="#2563eb" stroke-width="1.5" marker-end="url(#m-arrow-blue)"/>
+
+        <!-- Step A2 -->
+        <rect x="50" y="235" width="300" height="70" rx="8" fill="#ffffff" stroke="#bfdbfe" stroke-width="1"/>
+        <text x="65" y="255" fill="#0f172a" font-size="11" font-weight="600">2. Appended as "pending" entry</text>
+        <text x="65" y="273" fill="#64748b" font-size="10">Format: [DATE | TICKER | RATING |</text>
+        <text x="65" y="291" fill="#64748b" font-size="10">raw_return | alpha_return | holding_days]</text>
+
+        <!-- Phase B: Deferred Reflection -->
+        <rect x="400" y="80" width="360" height="340" rx="12" fill="url(#memPhase2)" stroke="#c4b5fd" stroke-width="1.5" filter="url(#memShadow)"/>
+        <text x="580" y="108" text-anchor="middle" fill="#6d28d9" font-size="13" font-weight="700">PHASE B: Deferred Reflection</text>
+        <text x="580" y="125" text-anchor="middle" fill="#64748b" font-size="10">(On next run for same ticker)</text>
+
+        <!-- Step B1 -->
+        <rect x="420" y="140" width="320" height="70" rx="8" fill="#ffffff" stroke="#ddd6fe" stroke-width="1"/>
+        <text x="435" y="160" fill="#0f172a" font-size="11" font-weight="600">1. _resolve_pending_entries()</text>
+        <text x="435" y="178" fill="#64748b" font-size="10">Fetches actual returns via yfinance</text>
+        <text x="435" y="196" fill="#64748b" font-size="10">Calculates raw_return and alpha vs benchmark</text>
+
+        <line x1="580" y1="210" x2="580" y2="235" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#m-arrow-purple)"/>
+
+        <!-- Step B2 -->
+        <rect x="420" y="235" width="320" height="70" rx="8" fill="#ffffff" stroke="#ddd6fe" stroke-width="1"/>
+        <text x="435" y="255" fill="#0f172a" font-size="11" font-weight="600">2. Reflector.reflect_on_final_decision()</text>
+        <text x="435" y="273" fill="#64748b" font-size="10">Quick Think LLM generates 2-4 sentence</text>
+        <text x="435" y="291" fill="#64748b" font-size="10">reflection: was call correct? what worked?</text>
+
+        <line x1="580" y1="305" x2="580" y2="330" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#m-arrow-purple)"/>
+
+        <!-- Step B3 -->
+        <rect x="420" y="330" width="320" height="70" rx="8" fill="#ffffff" stroke="#ddd6fe" stroke-width="1"/>
+        <text x="435" y="350" fill="#0f172a" font-size="11" font-weight="600">3. Entry updated in memory log</text>
+        <text x="435" y="368" fill="#64748b" font-size="10">Pending &#x2192; Resolved with returns + reflection</text>
+        <text x="435" y="386" fill="#64748b" font-size="10">Now available as a "lesson" for future runs</text>
+
+        <!-- Phase C: Context Injection -->
+        <rect x="790" y="80" width="330" height="340" rx="12" fill="url(#memPhase3)" stroke="#6ee7b7" stroke-width="1.5" filter="url(#memShadow)"/>
+        <text x="955" y="108" text-anchor="middle" fill="#047857" font-size="13" font-weight="700">PHASE C: Context Injection</text>
+        <text x="955" y="125" text-anchor="middle" fill="#64748b" font-size="10">(At start of each new run)</text>
+
+        <!-- Step C1 -->
+        <rect x="810" y="140" width="290" height="80" rx="8" fill="#ffffff" stroke="#a7f3d0" stroke-width="1"/>
+        <text x="825" y="160" fill="#0f172a" font-size="11" font-weight="600">get_past_context(ticker)</text>
+        <text x="825" y="180" fill="#64748b" font-size="10">Retrieves from trading_memory.md:</text>
+        <text x="825" y="200" fill="#2563eb" font-size="10" font-weight="600">5 same-ticker entries</text>
+        <text x="825" y="215" fill="#64748b" font-size="9">Full decision + outcome + reflection</text>
+
+        <!-- Step C2 -->
+        <rect x="810" y="235" width="290" height="80" rx="8" fill="#ffffff" stroke="#a7f3d0" stroke-width="1"/>
+        <text x="825" y="255" fill="#0f172a" font-size="11" font-weight="600">Cross-ticker transfer learning</text>
+        <text x="825" y="275" fill="#64748b" font-size="10">Retrieves:</text>
+        <text x="825" y="295" fill="#7c3aed" font-size="10" font-weight="600">3 cross-ticker entries</text>
+        <text x="825" y="310" fill="#64748b" font-size="9">Reflection only (transferable lessons)</text>
+
+        <!-- Step C3 -->
+        <rect x="810" y="330" width="290" height="70" rx="8" fill="#ffffff" stroke="#a7f3d0" stroke-width="1"/>
+        <text x="825" y="350" fill="#0f172a" font-size="11" font-weight="600">Injected into PM prompt</text>
+        <text x="825" y="368" fill="#64748b" font-size="10">"Lessons from prior decisions" section</text>
+        <text x="825" y="386" fill="#64748b" font-size="10">in Portfolio Manager system prompt</text>
+
+        <!-- Flow arrows between phases -->
+        <line x1="370" y1="200" x2="400" y2="200" stroke="#7c3aed" stroke-width="2" marker-end="url(#m-arrow-purple)"/>
+        <text x="385" y="193" text-anchor="middle" fill="#7c3aed" font-size="8">next run</text>
+
+        <line x1="760" y1="200" x2="790" y2="200" stroke="#059669" stroke-width="2" marker-end="url(#m-arrow-green)"/>
+        <text x="775" y="193" text-anchor="middle" fill="#059669" font-size="8">inject</text>
+
+        <!-- Memory Log File Visualization -->
+        <rect x="30" y="350" width="1090" height="120" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#memShadow)"/>
+        <text x="575" y="375" text-anchor="middle" fill="#475569" font-size="11" font-weight="700">MEMORY LOG FILE: ~/.tradingagents/memory/trading_memory.md</text>
+
+        <!-- Log entries visualization -->
+        <rect x="50" y="390" width="200" height="65" rx="6" fill="#fef3c7" stroke="#fcd34d" stroke-width="1"/>
+        <text x="150" y="410" text-anchor="middle" fill="#92400e" font-size="10" font-weight="600">[2026-01-10 | NVDA]</text>
+        <text x="150" y="425" text-anchor="middle" fill="#92400e" font-size="10">Rating: Buy</text>
+        <text x="150" y="440" text-anchor="middle" fill="#92400e" font-size="9">Return: +12.3%</text>
+        <text x="150" y="452" text-anchor="middle" fill="#92400e" font-size="8" font-style="italic">Resolved &#x2714;</text>
+
+        <rect x="270" y="390" width="200" height="65" rx="6" fill="#fef3c7" stroke="#fcd34d" stroke-width="1"/>
+        <text x="370" y="410" text-anchor="middle" fill="#92400e" font-size="10" font-weight="600">[2026-01-12 | AAPL]</text>
+        <text x="370" y="425" text-anchor="middle" fill="#92400e" font-size="10">Rating: Hold</text>
+        <text x="370" y="440" text-anchor="middle" fill="#92400e" font-size="9">Return: +2.1%</text>
+        <text x="370" y="452" text-anchor="middle" fill="#92400e" font-size="8" font-style="italic">Resolved &#x2714;</text>
+
+        <rect x="490" y="390" width="200" height="65" rx="6" fill="#fef3c7" stroke="#fcd34d" stroke-width="1"/>
+        <text x="590" y="410" text-anchor="middle" fill="#92400e" font-size="10" font-weight="600">[2026-01-14 | TSLA]</text>
+        <text x="590" y="425" text-anchor="middle" fill="#92400e" font-size="10">Rating: Sell</text>
+        <text x="590" y="440" text-anchor="middle" fill="#92400e" font-size="9">Return: -8.7%</text>
+        <text x="590" y="452" text-anchor="middle" fill="#92400e" font-size="8" font-style="italic">Resolved &#x2714;</text>
+
+        <rect x="710" y="390" width="200" height="65" rx="6" fill="#dbeafe" stroke="#93c5fd" stroke-width="1.5"/>
+        <text x="810" y="410" text-anchor="middle" fill="#1d4ed8" font-size="10" font-weight="600">[2026-01-15 | NVDA]</text>
+        <text x="810" y="425" text-anchor="middle" fill="#1d4ed8" font-size="10">Rating: Overweight</text>
+        <text x="810" y="440" text-anchor="middle" fill="#64748b" font-size="9">Return: pending...</text>
+        <text x="810" y="452" text-anchor="middle" fill="#2563eb" font-size="8" font-weight="600">PENDING &#x23F3;</text>
+
+        <rect x="930" y="390" width="170" height="65" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
+        <text x="1015" y="415" text-anchor="middle" fill="#64748b" font-size="10">...more entries</text>
+        <text x="1015" y="435" text-anchor="middle" fill="#94a3b8" font-size="9">Rotation optional</text>
+        <text x="1015" y="452" text-anchor="middle" fill="#94a3b8" font-size="9">via config</text>
+
+        <!-- Benchmark Resolution -->
+        <rect x="30" y="500" width="540" height="180" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#memShadow)"/>
+        <text x="300" y="525" text-anchor="middle" fill="#475569" font-size="12" font-weight="700">Benchmark Resolution System</text>
+
+        <rect x="50" y="540" width="500" height="125" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+        <text x="300" y="560" text-anchor="middle" fill="#0f172a" font-size="11" font-weight="600">Auto-detects regional benchmark by ticker suffix:</text>
+
+        <g transform="translate(70, 575)">
+          <rect width="100" height="28" rx="4" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+          <text x="50" y="593" text-anchor="middle" fill="#1d4ed8" font-size="10">.NS &#x2192; ^NSEI</text>
+        </g>
+        <g transform="translate(180, 575)">
+          <rect width="100" height="28" rx="4" fill="#ecfeff" stroke="#a5f3fc" stroke-width="1"/>
+          <text x="50" y="593" text-anchor="middle" fill="#0e7490" font-size="10">.T &#x2192; ^N225</text>
+        </g>
+        <g transform="translate(290, 575)">
+          <rect width="100" height="28" rx="4" fill="#f5f3ff" stroke="#ddd6fe" stroke-width="1"/>
+          <text x="50" y="593" text-anchor="middle" fill="#6d28d9" font-size="10">.L &#x2192; ^FTSE</text>
+        </g>
+        <g transform="translate(400, 575)">
+          <rect width="100" height="28" rx="4" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+          <text x="50" y="593" text-anchor="middle" fill="#047857" font-size="10">default &#x2192; SPY</text>
+        </g>
+
+        <text x="300" y="625" text-anchor="middle" fill="#64748b" font-size="10">Alpha = raw_return - benchmark_return over 5-day holding period</text>
+
+        <!-- MemEvolve Config -->
+        <rect x="590" y="500" width="530" height="180" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#memShadow)"/>
+        <text x="855" y="525" text-anchor="middle" fill="#475569" font-size="12" font-weight="700">MemEvolve Configuration</text>
+
+        <rect x="610" y="540" width="490" height="125" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+        <text x="630" y="562" fill="#0f172a" font-size="11" font-family="monospace">evolution_enabled: False</text>
+        <text x="630" y="580" fill="#64748b" font-size="10">(Phase 1 -- disabled by default)</text>
+        <text x="630" y="600" fill="#0f172a" font-size="11" font-family="monospace">dry_run: True</text>
+        <text x="630" y="618" fill="#64748b" font-size="10">(Log evolution without applying)</text>
+        <text x="630" y="638" fill="#0f172a" font-size="11" font-family="monospace">evolve_every_n_decisions: 20</text>
+        <text x="630" y="656" fill="#64748b" font-size="10">min_feedback_for_evolution: 5</text>
+
+      </svg>
+    </div>
+
+    <div class="light-note">
+      <strong>Future Roadmap:</strong> The memory system supports "vector" and "hybrid" provider backends (planned). The current "file" provider uses append-only markdown with HTML comment delimiters for entry boundaries.
+    </div>
+  </div>
+</div>
+
+<!-- TAB 13: Data Vendor Routing -->
+<div class="tab-content light-tab" id="tab-vendor-routing">
+  <div class="light-section">
+    <h2 class="light-title">Data Vendor Routing Architecture</h2>
+    <p class="light-intro">All data tools route through a vendor abstraction layer that supports yfinance (default) and Alpha Vantage. Each tool category can be independently configured per-vendor, with tool-level overrides available at runtime.</p>
+
+    <div class="vendor-visual">
+      <svg viewBox="0 0 1150 650" xmlns="http://www.w3.org/2000/svg" class="vendor-svg">
+        <defs>
+          <linearGradient id="vendorBg" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#fafbff;stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:#fffbeb;stop-opacity:1"/>
+          </linearGradient>
+          <filter id="vendorShadow">
+            <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#0f172a" flood-opacity="0.08"/>
+          </filter>
+          <marker id="v-arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+          </marker>
+          <marker id="v-arrow-green" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#059669"/>
+          </marker>
+          <marker id="v-arrow-blue" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+          </marker>
+        </defs>
+
+        <!-- Background -->
+        <rect x="0" y="0" width="1150" height="650" rx="16" fill="url(#vendorBg)" stroke="#e2e8f0" stroke-width="1.5"/>
+
+        <text x="575" y="35" text-anchor="middle" fill="#0f172a" font-size="18" font-weight="700" font-family="'Georgia', serif">Data Vendor Routing Layer</text>
+        <text x="575" y="55" text-anchor="middle" fill="#64748b" font-size="12">interface.py &#x2022; route_to_vendor() &#x2022; Per-category vendor configuration</text>
+
+        <!-- Tool Layer -->
+        <rect x="30" y="80" width="1090" height="140" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#vendorShadow)"/>
+        <text x="575" y="105" text-anchor="middle" fill="#475569" font-size="12" font-weight="700">TOOL LAYER (Agent calls these functions)</text>
+
+        <!-- Tool boxes -->
+        <g transform="translate(50, 120)">
+          <rect width="130" height="80" rx="8" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+          <text x="65" y="145" text-anchor="middle" fill="#1d4ed8" font-size="10" font-weight="600">get_stock_data</text>
+          <text x="65" y="162" text-anchor="middle" fill="#64748b" font-size="9">OHLCV prices</text>
+          <text x="65" y="178" text-anchor="middle" fill="#64748b" font-size="9">symbol, dates</text>
+          <text x="65" y="194" text-anchor="middle" fill="#94a3b8" font-size="8">Market Analyst</text>
+        </g>
+
+        <g transform="translate(195, 120)">
+          <rect width="130" height="80" rx="8" fill="#ecfeff" stroke="#a5f3fc" stroke-width="1"/>
+          <text x="65" y="145" text-anchor="middle" fill="#0e7490" font-size="10" font-weight="600">get_indicators</text>
+          <text x="65" y="162" text-anchor="middle" fill="#64748b" font-size="9">12 indicators</text>
+          <text x="65" y="178" text-anchor="middle" fill="#64748b" font-size="9">symbol, indicator</text>
+          <text x="65" y="194" text-anchor="middle" fill="#94a3b8" font-size="8">Market Analyst</text>
+        </g>
+
+        <g transform="translate(340, 120)">
+          <rect width="130" height="80" rx="8" fill="#f5f3ff" stroke="#ddd6fe" stroke-width="1"/>
+          <text x="65" y="145" text-anchor="middle" fill="#6d28d9" font-size="10" font-weight="600">get_news</text>
+          <text x="65" y="162" text-anchor="middle" fill="#64748b" font-size="9">Ticker news</text>
+          <text x="65" y="178" text-anchor="middle" fill="#64748b" font-size="9">symbol (limit: 20)</text>
+          <text x="65" y="194" text-anchor="middle" fill="#94a3b8" font-size="8">News Analyst</text>
+        </g>
+
+        <g transform="translate(485, 120)">
+          <rect width="130" height="80" rx="8" fill="#fdf2f8" stroke="#fbcfe8" stroke-width="1"/>
+          <text x="65" y="145" text-anchor="middle" fill="#be185d" font-size="10" font-weight="600">get_global_news</text>
+          <text x="65" y="162" text-anchor="middle" fill="#64748b" font-size="9">Macro events</text>
+          <text x="65" y="178" text-anchor="middle" fill="#64748b" font-size="9">query (limit: 10)</text>
+          <text x="65" y="194" text-anchor="middle" fill="#94a3b8" font-size="8">News Analyst</text>
+        </g>
+
+        <g transform="translate(630, 120)">
+          <rect width="130" height="80" rx="8" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+          <text x="65" y="145" text-anchor="middle" fill="#047857" font-size="10" font-weight="600">get_fundamentals</text>
+          <text x="65" y="162" text-anchor="middle" fill="#64748b" font-size="9">Company overview</text>
+          <text x="65" y="178" text-anchor="middle" fill="#64748b" font-size="9">symbol</text>
+          <text x="65" y="194" text-anchor="middle" fill="#94a3b8" font-size="8">Fundamentals</text>
+        </g>
+
+        <g transform="translate(775, 120)">
+          <rect width="130" height="80" rx="8" fill="#fffbeb" stroke="#fde68a" stroke-width="1"/>
+          <text x="65" y="145" text-anchor="middle" fill="#b45309" font-size="10" font-weight="600">get_balance_sheet</text>
+          <text x="65" y="162" text-anchor="middle" fill="#64748b" font-size="9">Assets/liabilities</text>
+          <text x="65" y="178" text-anchor="middle" fill="#64748b" font-size="9">symbol</text>
+          <text x="65" y="194" text-anchor="middle" fill="#94a3b8" font-size="8">Fundamentals</text>
+        </g>
+
+        <g transform="translate(920, 120)">
+          <rect width="180" height="80" rx="8" fill="#fef3c7" stroke="#fcd34d" stroke-width="1"/>
+          <text x="90" y="140" text-anchor="middle" fill="#92400e" font-size="10" font-weight="600">+ get_cashflow</text>
+          <text x="90" y="157" text-anchor="middle" fill="#92400e" font-size="10" font-weight="600">+ get_income_statement</text>
+          <text x="90" y="174" text-anchor="middle" fill="#92400e" font-size="10" font-weight="600">+ get_insider_transactions</text>
+          <text x="90" y="194" text-anchor="middle" fill="#94a3b8" font-size="8">Fundamentals / News</text>
+        </g>
+
+        <!-- Arrow down -->
+        <line x1="575" y1="220" x2="575" y2="255" stroke="#475569" stroke-width="2" marker-end="url(#v-arrow)"/>
+
+        <!-- Routing Layer -->
+        <rect x="30" y="260" width="1090" height="120" rx="12" fill="#faf5ff" stroke="#c4b5fd" stroke-width="1.5" filter="url(#vendorShadow)"/>
+        <text x="575" y="285" text-anchor="middle" fill="#6d28d9" font-size="12" font-weight="700">ROUTING LAYER (dataflows/interface.py)</text>
+
+        <rect x="200" y="300" width="750" height="65" rx="8" fill="#ffffff" stroke="#ddd6fe" stroke-width="1"/>
+        <text x="575" y="320" text-anchor="middle" fill="#0f172a" font-size="11" font-weight="600" font-family="monospace">route_to_vendor(tool_name, category, **kwargs)</text>
+        <text x="575" y="340" text-anchor="middle" fill="#64748b" font-size="10">Looks up vendor for category &#x2192; dispatches to yfinance or alpha_vantage module</text>
+        <text x="575" y="357" text-anchor="middle" fill="#64748b" font-size="10">Supports tool-level overrides via tool_vendors dict</text>
+
+        <!-- Arrow down -->
+        <line x1="300" y1="380" x2="300" y2="420" stroke="#059669" stroke-width="2" marker-end="url(#v-arrow-green)"/>
+        <line x1="850" y1="380" x2="850" y2="420" stroke="#2563eb" stroke-width="2" marker-end="url(#v-arrow-blue)"/>
+
+        <!-- Vendor implementations -->
+        <rect x="30" y="420" width="540" height="210" rx="12" fill="#f0fdf4" stroke="#6ee7b7" stroke-width="1.5" filter="url(#vendorShadow)"/>
+        <text x="300" y="448" text-anchor="middle" fill="#047857" font-size="13" font-weight="700">yfinance (Default)</text>
+        <text x="300" y="466" text-anchor="middle" fill="#64748b" font-size="10">No API key required &#x2022; Free &#x2022; Rate-limited</text>
+
+        <g transform="translate(50, 480)">
+          <rect width="500" height="135" rx="8" fill="#ffffff" stroke="#a7f3d0" stroke-width="1"/>
+          <text x="250" y="500" text-anchor="middle" fill="#0f172a" font-size="11" font-weight="600">Modules:</text>
+          <g transform="translate(20, 515)">
+            <rect width="110" height="24" rx="4" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+            <text x="55" y="531" text-anchor="middle" fill="#047857" font-size="9">y_finance.py</text>
+          </g>
+          <g transform="translate(140, 515)">
+            <rect width="120" height="24" rx="4" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+            <text x="60" y="531" text-anchor="middle" fill="#047857" font-size="9">yfinance_news.py</text>
+          </g>
+          <g transform="translate(270, 515)">
+            <rect width="120" height="24" rx="4" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+            <text x="60" y="531" text-anchor="middle" fill="#047857" font-size="9">stockstats_utils.py</text>
+          </g>
+          <g transform="translate(400, 515)">
+            <rect width="80" height="24" rx="4" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+            <text x="40" y="531" text-anchor="middle" fill="#047857" font-size="9">reddit.py</text>
+          </g>
+          <g transform="translate(20, 548)">
+            <rect width="100" height="24" rx="4" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+            <text x="50" y="564" text-anchor="middle" fill="#047857" font-size="9">stocktwits.py</text>
+          </g>
+          <text x="250" y="595" text-anchor="middle" fill="#64748b" font-size="10">Covers: stock data, indicators, fundamentals, news, insider, social data</text>
+          <text x="250" y="612" text-anchor="middle" fill="#64748b" font-size="10">Uses: yf_retry, load_ohlcv, StockstatsUtils for indicator computation</text>
+        </g>
+
+        <rect x="590" y="420" width="530" height="210" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5" filter="url(#vendorShadow)"/>
+        <text x="855" y="448" text-anchor="middle" fill="#1d4ed8" font-size="13" font-weight="700">Alpha Vantage (Optional)</text>
+        <text x="855" y="466" text-anchor="middle" fill="#64748b" font-size="10">Requires ALPHA_VANTAGE_API_KEY &#x2022; Rate-limited (5/min free)</text>
+
+        <g transform="translate(610, 480)">
+          <rect width="490" height="135" rx="8" fill="#ffffff" stroke="#bfdbfe" stroke-width="1"/>
+          <text x="245" y="500" text-anchor="middle" fill="#0f172a" font-size="11" font-weight="600">Modules:</text>
+          <g transform="translate(20, 515)">
+            <rect width="140" height="24" rx="4" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+            <text x="70" y="531" text-anchor="middle" fill="#1d4ed8" font-size="9">alpha_vantage_stock.py</text>
+          </g>
+          <g transform="translate(170, 515)">
+            <rect width="150" height="24" rx="4" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+            <text x="75" y="531" text-anchor="middle" fill="#1d4ed8" font-size="9">alpha_vantage_indicator.py</text>
+          </g>
+          <g transform="translate(330, 515)">
+            <rect width="140" height="24" rx="4" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+            <text x="70" y="531" text-anchor="middle" fill="#1d4ed8" font-size="9">alpha_vantage_fundamentals.py</text>
+          </g>
+          <g transform="translate(20, 548)">
+            <rect width="130" height="24" rx="4" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+            <text x="65" y="564" text-anchor="middle" fill="#1d4ed8" font-size="9">alpha_vantage_news.py</text>
+          </g>
+          <g transform="translate(160, 548)">
+            <rect width="130" height="24" rx="4" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+            <text x="65" y="564" text-anchor="middle" fill="#1d4ed8" font-size="9">alpha_vantage_common.py</text>
+          </g>
+          <text x="245" y="595" text-anchor="middle" fill="#64748b" font-size="10">Covers: stock data, indicators, fundamentals, news, global news, insider</text>
+          <text x="245" y="612" text-anchor="middle" fill="#64748b" font-size="10">Uses: _make_api_request with rate limit handling and retry logic</text>
+        </g>
+
+      </svg>
+    </div>
+
+    <div class="light-note">
+      <strong>Configuration:</strong> Set vendors in <code>default_config.py</code> under <code>"data_vendors"</code> dict. Each category (core_stock_apis, technical_indicators, fundamental_data, news_data) can independently use "yfinance" or "alpha_vantage". Tool-level overrides via <code>tool_vendors</code> dict at runtime.
+    </div>
+  </div>
+</div>
+
+<!-- Light theme CSS for new tabs -->
+<style>
+  .light-tab {
+    background: #f8fafc;
+    min-height: 100vh;
+    padding: 2rem;
+  }
+
+  .light-section {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .light-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #0f172a;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    margin-bottom: 0.75rem;
+  }
+
+  .light-intro {
+    font-size: 0.95rem;
+    color: #475569;
+    line-height: 1.7;
+    margin-bottom: 2rem;
+    max-width: 900px;
+  }
+
+  .light-intro code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85rem;
+    background: #f1f5f9;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    color: #7c3aed;
+  }
+
+  .schema-visual, .orchestration-visual, .memevolve-visual, .vendor-visual {
+    margin-bottom: 1.5rem;
+  }
+
+  .schema-svg, .orch-svg, .memevolve-svg, .vendor-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 12px;
+  }
+
+  .light-note {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-left: 4px solid #d97706;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    font-size: 0.85rem;
+    color: #78350f;
+    line-height: 1.6;
+  }
+
+  .light-note code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    background: #fef3c7;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+  }
+
+  .light-note strong {
+    color: #92400e;
+  }
+
+  /* Override dark theme for new tabs */
+  .light-tab .tab-content {
+    background: transparent;
+  }
+</style>
 
 <div class="tooltip" id="tooltip"></div>
 
