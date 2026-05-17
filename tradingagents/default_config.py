@@ -50,6 +50,24 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # the oldest resolved entries are pruned once this limit is exceeded.
     # Pending entries are never pruned. None disables rotation entirely.
     "memory_log_max_entries": None,
+    # Memory evolution configuration (MemEvolve integration — Phase 1 disabled by default).
+    "memory": {
+        "provider": "file",            # "file" | "vector" (future) | "hybrid" (future)
+        "evolution_enabled": False,    # Master switch for self-adaptation
+        "dry_run": True,               # Log evolution proposals without applying them
+        "evolve_every_n_decisions": 20,
+        "min_feedback_for_evolution": 5,
+        "effectiveness_threshold": 0.5,
+        # Adaptive retrieval bounds
+        "retrieval": {
+            "n_same_min": 2,
+            "n_same_max": 10,
+            "n_same_default": 5,
+            "n_cross_min": 1,
+            "n_cross_max": 6,
+            "n_cross_default": 3,
+        },
+    },
     # LLM settings
     "llm_provider": "openai",
     "deep_think_llm": "gpt-5.4",

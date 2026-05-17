@@ -18,6 +18,7 @@ from tradingagents.llm_clients import create_llm_client
 from tradingagents.agents import *
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.memory import FileMemoryProvider, MemoryProvider
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.agents.utils.agent_states import (
     AgentState,
@@ -99,7 +100,9 @@ class TradingAgentsGraph:
         self.deep_thinking_llm = deep_client.get_llm()
         self.quick_thinking_llm = quick_client.get_llm()
         
-        self.memory_log = TradingMemoryLog(self.config)
+        self.memory_provider: MemoryProvider = FileMemoryProvider(self.config)
+        # Back-compat alias: existing code and phases may still reference memory_log.
+        self.memory_log = self.memory_provider
 
         # Create tool nodes
         self.tool_nodes = self._create_tool_nodes()
