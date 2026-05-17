@@ -1,0 +1,2549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memory Evolution Implementation Plan</title>
+    <style>
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 20px;
+    color: #24292e;
+    background-color: #ffffff;
+}
+h1 { font-size: 2em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+h3 { font-size: 1.25em; }
+code {
+    background-color: rgba(27,31,35,0.05);
+    border-radius: 3px;
+    padding: 0.2em 0.4em;
+    font-size: 85%;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+pre {
+    background-color: #f6f8fa;
+    border-radius: 6px;
+    padding: 16px;
+    overflow: auto;
+    font-size: 85%;
+    line-height: 1.45;
+}
+pre code {
+    background-color: transparent;
+    padding: 0;
+    font-size: 100%;
+}
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+}
+table th, table td {
+    border: 1px solid #dfe2e5;
+    padding: 6px 13px;
+}
+table th {
+    background-color: #f6f8fa;
+    font-weight: 600;
+}
+table tr:nth-child(2n) {
+    background-color: #f6f8fa;
+}
+blockquote {
+    border-left: 4px solid #dfe2e5;
+    margin: 0;
+    padding: 0 1em;
+    color: #6a737d;
+}
+a { color: #0366d6; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+    height: 0.25em;
+    padding: 0;
+    margin: 24px 0;
+    background-color: #e1e4e8;
+    border: 0;
+}
+ul, ol { padding-left: 2em; }
+</style>
+</head>
+<body>
+<h1 id="memory-evolution-implementation-plan">Memory Evolution Implementation Plan</h1>
+<blockquote>
+<p><strong>Inspired by:</strong> MemEvolve: Meta-Evolution of Agent Memory Systems (ICML 2026)
+<strong>Target:</strong> TradingAgents — append-only markdown decision journal
+<strong>Goal:</strong> Transform static memory into a self-adapting, effectiveness-driven system
+<strong>Timeline:</strong> 8 weeks (5 phases)
+<strong>Risk:</strong> Low — backward compatible, opt-in evolution, zero breaking changes</p>
+</blockquote>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-current-state-analysis">Current State Analysis</a></li>
+<li><a href="#2-memevolve-core-concepts-applied">MemEvolve Core Concepts Applied</a></li>
+<li><a href="#3-architecture-overview">Architecture Overview</a></li>
+<li><a href="#4-phase-1-modular-memory-interface">Phase 1: Modular Memory Interface</a></li>
+<li><a href="#5-phase-2-effectiveness-tracking">Phase 2: Effectiveness Tracking</a></li>
+<li><a href="#6-phase-3-diagnose-and-design-evolution">Phase 3: Diagnose-and-Design Evolution</a></li>
+<li><a href="#7-phase-4-advanced-memory-providers">Phase 4: Advanced Memory Providers</a></li>
+<li><a href="#8-phase-5-integration-cli--validation">Phase 5: Integration, CLI &amp; Validation</a></li>
+<li><a href="#9-file-structure">File Structure</a></li>
+<li><a href="#10-config-schema">Config Schema</a></li>
+<li><a href="#11-migration-path">Migration Path</a></li>
+<li><a href="#12-testing-strategy">Testing Strategy</a></li>
+<li><a href="#13-risk-assessment">Risk Assessment</a></li>
+<li><a href="#14-success-metrics">Success Metrics</a></li>
+</ol>
+<hr />
+<h2 id="1-current-state-analysis">1. Current State Analysis</h2>
+<h3 id="11-existing-memory-system">1.1 Existing Memory System</h3>
+<p><strong>File:</strong> <code>tradingagents/agents/utils/memory.py</code> — <code>TradingMemoryLog</code> class</p>
+<p><strong>Storage:</strong> Single append-only markdown file (<code>~/.tradingagents/memory/trading_memory.md</code>)</p>
+<p><strong>Entry Format:</strong></p>
+<pre><code>[2026-01-10 | NVDA | Buy | +4.2% | +2.1% | 5d]
+
+DECISION:
+Rating: Buy
+Enter at $189-192, 6% portfolio cap.
+
+REFLECTION:
+Directionally correct. The AI capex thesis held as data center demand exceeded expectations.
+
+&lt;!-- ENTRY_END --&gt;
+</code></pre>
+<p><strong>Lifecycle:</strong>
+- <strong>Phase A (Store):</strong> <code>store_decision()</code> appends <code>[date | ticker | rating | pending]</code> + DECISION
+- <strong>Phase B (Resolve):</strong> <code>_resolve_pending_entries()</code> fetches returns, generates LLM reflection, replaces <code>pending</code> tag
+- <strong>Retrieval:</strong> <code>get_past_context(ticker, n_same=5, n_cross=3)</code> returns 5 same-ticker + 3 cross-ticker entries
+- <strong>Rotation:</strong> <code>_apply_rotation()</code> drops oldest resolved entries when <code>memory_log_max_entries</code> cap is exceeded (default: <code>None</code> = unlimited)</p>
+<h3 id="12-identified-weaknesses">1.2 Identified Weaknesses</h3>
+<table>
+<thead>
+<tr>
+<th>Weakness</th>
+<th>Impact</th>
+<th>Severity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fixed <code>n_same=5, n_cross=3</code></td>
+<td>No adaptation to context window or decision quality</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Single retrieval metric (recency)</td>
+<td>Ignores rating patterns, outcome variance, relevance</td>
+<td>High</td>
+</tr>
+<tr>
+<td>No effectiveness tracking</td>
+<td>Cannot measure if memory actually helps PM decisions</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Default unbounded growth</td>
+<td>File grows indefinitely, O(N) parse cost every run</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Same-ticker-only resolution</td>
+<td>Cross-ticker pending entries accumulate forever</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Single-point injection</td>
+<td>Only Portfolio Manager sees memory; analysts/researchers don't</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>No semantic search</td>
+<td>Pure chronological — no relevance ranking</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>Full file rewrite on update</td>
+<td>Every <code>update_with_outcome</code> rewrites entire file</td>
+<td>Low</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13-what-works-well">1.3 What Works Well</h3>
+<ul>
+<li><strong>Simplicity:</strong> Single markdown file — human-readable, git-trackable, zero dependencies</li>
+<li><strong>Crash safety:</strong> Atomic writes via <code>os.replace()</code> prevent corruption</li>
+<li><strong>Idempotency:</strong> Duplicate store attempts silently ignored</li>
+<li><strong>Deferred reflection:</strong> Outcome-aware learning without blocking the pipeline</li>
+<li><strong>Rating extraction:</strong> Centralized 5-tier vocabulary prevents drift</li>
+</ul>
+<hr />
+<h2 id="2-memevolve-core-concepts-applied">2. MemEvolve Core Concepts Applied</h2>
+<h3 id="21-the-4-component-modular-design-space">2.1 The 4-Component Modular Design Space</h3>
+<p>MemEvolve decomposes any memory system into four functionally distinct components:</p>
+<pre><code>Ω = (Encode, Store, Retrieve, Manage)
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Role</th>
+<th>Current TradingAgents</th>
+<th>Evolved Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Encode</strong></td>
+<td>Transform raw experience into structured representation</td>
+<td>Extract rating from PM decision markdown</td>
+<td>Multi-level encoding: rating + key thesis + risk factors + outcome tags</td>
+</tr>
+<tr>
+<td><strong>Store</strong></td>
+<td>Persist encoded experience to storage</td>
+<td>Append to markdown file</td>
+<td>Pluggable: file, SQLite, vector DB, hybrid</td>
+</tr>
+<tr>
+<td><strong>Retrieve</strong></td>
+<td>Provide task-relevant context for current decision</td>
+<td>Last 5 same-ticker + 3 cross-ticker (recency only)</td>
+<td>Adaptive: effectiveness-weighted, rating-grouped, stage-aware</td>
+</tr>
+<tr>
+<td><strong>Manage</strong></td>
+<td>Offline consolidation, pruning, abstraction</td>
+<td>Optional rotation by count</td>
+<td>LLM-driven consolidation, semantic deduplication, pattern extraction</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-dual-evolution-process">2.2 Dual-Evolution Process</h3>
+<pre><code>Inner Loop (Every Run):
+  Agent runs with fixed memory Ω → produces decision → store → resolve outcome
+
+Outer Loop (Every N Runs):
+  Analyze effectiveness → Diagnose bottlenecks → Design new Ω → Validate → Deploy
+</code></pre>
+<h3 id="23-diagnose-and-design-evolution">2.3 Diagnose-and-Design Evolution</h3>
+<pre><code>Diagnosis:
+  - Collect feedback from last N runs
+  - Compute effectiveness metrics
+  - LLM analyzes trajectory evidence
+  - Produce structured defect profile D(Ω)
+
+Design:
+  - Conditioned on D(Ω), propose S variants
+  - Each variant modifies permissible components
+  - All conform to MemoryProvider interface
+  - Select best via Pareto optimization
+</code></pre>
+<h3 id="24-pragmatic-adaptation-for-tradingagents">2.4 Pragmatic Adaptation for TradingAgents</h3>
+<table>
+<thead>
+<tr>
+<th>MemEvolve (Paper)</th>
+<th>TradingAgents (This Plan)</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Evolves Python code for E/U/R/G modules</td>
+<td>Evolves config parameters + retrieval strategy</td>
+<td>Lower risk, no code generation needed</td>
+</tr>
+<tr>
+<td>Tournament across 3+ candidate systems</td>
+<td>Single-system self-adaptation</td>
+<td>10x lower LLM cost per evolution</td>
+</tr>
+<tr>
+<td>40 tasks per evaluation round</td>
+<td>20 decisions per evolution check</td>
+<td>Matches trading cadence</td>
+</tr>
+<tr>
+<td>Task success rate as metric</td>
+<td>Alpha return + rating accuracy + context utilization</td>
+<td>Domain-specific</td>
+</tr>
+<tr>
+<td>Generates new provider classes</td>
+<td>Selects from pre-built provider strategies</td>
+<td>Safer, testable, auditable</td>
+</tr>
+<tr>
+<td>Cross-benchmark transfer</td>
+<td>Cross-ticker and cross-market transfer</td>
+<td>Same domain, different assets</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-architecture-overview">3. Architecture Overview</h2>
+<pre><code>┌──────────────────────────────────────────────────────────────────────┐
+│                        TradingAgents Graph                           │
+│  Analyst → Research → Trader → Risk → Portfolio Manager              │
+└──────────────────┬───────────────────────────┬──────────────────────┘
+                   │                           │
+                   ▼                           ▼
+┌──────────────────────────────┐  ┌──────────────────────────────────┐
+│  Inner Loop (Every Run)      │  │  Outer Loop (Every N Decisions)  │
+│                              │  │                                  │
+│  1. Encode: PM decision      │  │  1. Diagnose:                    │
+│     → MemoryEntry            │  │     - Collect feedback history   │
+│                              │  │     - Compute effectiveness      │
+│  2. Store: append to log     │  │     - LLM analyzes bottlenecks   │
+│                              │  │                                  │
+│  3. Retrieve: context for    │  │  2. Design:                      │
+│     next PM decision         │◄─┤     - Propose config variants    │
+│     (n_same, n_cross, format)│  │     - Pareto-optimal selection   │
+│                              │  │                                  │
+│  4. Manage: rotation,        │  │  3. Apply:                       │
+│     dedup, consolidation     │  │     - Update provider config     │
+│                              │  │     - Log evolution event        │
+└──────────────────────────────┘  └──────────────────────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                     Memory Provider Layer                            │
+│                                                                      │
+│  ┌─────────────┐  ┌──────────────────┐  ┌──────────────────────┐   │
+│  │FileProvider │  │RatingGroupedProv │  │OutcomeWeightedProv   │   │
+│  │(current)    │  │(by rating group) │  │(by alpha performance)│   │
+│  └─────────────┘  └──────────────────┘  └──────────────────────┘   │
+│                                                                      │
+│  Protocol: encode() → store() → retrieve() → manage() → evolve()   │
+└──────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="4-phase-1-modular-memory-interface">4. Phase 1: Modular Memory Interface</h2>
+<p><strong>Timeline:</strong> Week 1
+<strong>Goal:</strong> Refactor <code>TradingMemoryLog</code> into the 4-component MemEvolve interface without changing behavior.</p>
+<h3 id="41-create-memory-protocol-and-data-classes">4.1 Create Memory Protocol and Data Classes</h3>
+<p><strong>File:</strong> <code>tradingagents/memory/provider.py</code></p>
+<pre><code class="language-python">&quot;&quot;&quot;Memory Provider Protocol — MemEvolve-style 4-component interface.&quot;&quot;&quot;
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Any
+from enum import Enum
+
+
+class MemoryComponent(Enum):
+    ENCODE = &quot;encode&quot;
+    STORE = &quot;store&quot;
+    RETRIEVE = &quot;retrieve&quot;
+    MANAGE = &quot;manage&quot;
+
+
+@dataclass
+class MemoryEntry:
+    &quot;&quot;&quot;Structured representation of a trading decision.&quot;&quot;&quot;
+    date: str
+    ticker: str
+    rating: str                          # Buy / Overweight / Hold / Underweight / Sell
+    decision: str                        # Full PM decision text
+    reflection: str = &quot;&quot;                 # Post-outcome reflection (empty when pending)
+    raw_return: Optional[float] = None   # e.g., 0.042 = +4.2%
+    alpha_return: Optional[float] = None # Alpha vs benchmark
+    holding_days: Optional[int] = None
+    pending: bool = True
+    metadata: Dict[str, Any] = field(default_factory=dict)
+        # Future: sector, market_cap, thesis_keywords, risk_factors
+
+
+@dataclass
+class MemoryRequest:
+    &quot;&quot;&quot;Context for memory retrieval.&quot;&quot;&quot;
+    ticker: str
+    trade_date: str
+    n_same: int = 5                      # Max same-ticker entries
+    n_cross: int = 3                     # Max cross-ticker entries
+    min_effectiveness: float = 0.0       # Filter by historical effectiveness
+    rating_filter: Optional[str] = None  # Filter by rating
+
+
+@dataclass
+class MemoryResponse:
+    &quot;&quot;&quot;Retrieved memory context.&quot;&quot;&quot;
+    context: str                         # Formatted markdown for prompt injection
+    entries: List[MemoryEntry]
+    total_available: int                 # Total entries in storage (for diagnostics)
+    retrieval_time_ms: float = 0.0
+
+
+@dataclass
+class EvolutionFeedback:
+    &quot;&quot;&quot;Feedback signal for memory evolution.&quot;&quot;&quot;
+    run_id: str
+    ticker: str
+    trade_date: str
+    decision: str
+    rating: str
+    memory_injected: bool
+    memory_context_length: int
+    outcome_known: bool
+    raw_return: Optional[float] = None
+    alpha_return: Optional[float] = None
+    decision_matches_memory_pattern: Optional[bool] = None
+    effectiveness_score: Optional[float] = None  # 0.0 - 1.0
+
+
+@dataclass
+class DiagnosisReport:
+    &quot;&quot;&quot;Structured defect profile from evolution diagnosis.&quot;&quot;&quot;
+    issues: List[Dict[str, Any]]
+    llm_analysis: str
+    component_scores: Dict[MemoryComponent, float]
+    recommended_actions: List[str]
+
+
+@dataclass
+class MemoryConfig:
+    &quot;&quot;&quot;Configurable parameters for a memory provider.&quot;&quot;&quot;
+    provider_type: str = &quot;file&quot;
+    n_same: int = 5
+    n_cross: int = 3
+    max_context_length: int = 4000
+    format_style: str = &quot;full&quot;           # full, reflection_only, summary
+    selection_strategy: str = &quot;recency&quot;  # recency, rating_grouped, outcome_weighted
+    rotation_max_entries: Optional[int] = None
+    dedup_enabled: bool = False
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+class MemoryProvider(ABC):
+    &quot;&quot;&quot;Abstract base for all memory providers.
+
+    Implements the MemEvolve 4-component interface:
+      Ω = (Encode, Store, Retrieve, Manage)
+
+    All providers must implement these four methods. The optional
+    evolve() method enables architectural self-adaptation.
+    &quot;&quot;&quot;
+
+    def __init__(self, config: MemoryConfig):
+        self.config = config
+
+    @abstractmethod
+    def encode(self, decision_text: str, ticker: str, date: str,
+               rating: Optional[str] = None) -&gt; MemoryEntry:
+        &quot;&quot;&quot;Transform raw PM decision into structured MemoryEntry.
+
+        This is the Encode (E) component. It extracts rating,
+        parses decision text, and optionally enriches with metadata.
+        &quot;&quot;&quot;
+
+    @abstractmethod
+    def store(self, entry: MemoryEntry) -&gt; bool:
+        &quot;&quot;&quot;Persist entry to storage.
+
+        This is the Store (U) component. Returns True on success.
+        Must be idempotent for duplicate (ticker, date) pairs.
+        &quot;&quot;&quot;
+
+    @abstractmethod
+    def retrieve(self, request: MemoryRequest) -&gt; MemoryResponse:
+        &quot;&quot;&quot;Return task-relevant context for current run.
+
+        This is the Retrieve (R) component. The implementation
+        determines selection strategy (recency, rating, outcome, etc.).
+        &quot;&quot;&quot;
+
+    @abstractmethod
+    def manage(self) -&gt; Dict[str, Any]:
+        &quot;&quot;&quot;Offline consolidation, rotation, pruning.
+
+        This is the Manage (G) component. Returns stats dict.
+        Called periodically or after store operations.
+        &quot;&quot;&quot;
+
+    def evolve(self, feedback: EvolutionFeedback) -&gt; bool:
+        &quot;&quot;&quot;Adapt architecture based on effectiveness feedback.
+
+        Default: no-op. Subclasses override to implement self-evolution.
+        Returns True if architecture was modified.
+        &quot;&quot;&quot;
+        return False
+
+    def get_config(self) -&gt; MemoryConfig:
+        &quot;&quot;&quot;Return current configuration.&quot;&quot;&quot;
+        return self.config
+
+    def update_config(self, config: MemoryConfig) -&gt; None:
+        &quot;&quot;&quot;Update configuration (used by evolution).&quot;&quot;&quot;
+        self.config = config
+</code></pre>
+<h3 id="42-create-filememoryprovider-current-behavior">4.2 Create FileMemoryProvider (Current Behavior)</h3>
+<p><strong>File:</strong> <code>tradingagents/memory/file_provider.py</code></p>
+<pre><code class="language-python">&quot;&quot;&quot;File-based memory provider — drop-in replacement for TradingMemoryLog.&quot;&quot;&quot;
+
+from __future__ import annotations
+
+import os
+import re
+import tempfile
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+import time
+
+from .provider import (
+    MemoryProvider, MemoryConfig, MemoryEntry, MemoryRequest,
+    MemoryResponse, EvolutionFeedback, DiagnosisReport,
+)
+from tradingagents.agents.utils.rating import parse_rating
+
+
+class FileMemoryProvider(MemoryProvider):
+    &quot;&quot;&quot;Append-only markdown file storage.
+
+    Maintains exact same format as TradingMemoryLog for backward
+    compatibility. Wraps existing logic into the 4-component interface.
+    &quot;&quot;&quot;
+
+    _SEPARATOR = &quot;\n\n&lt;!-- ENTRY_END --&gt;\n\n&quot;
+    _DECISION_RE = re.compile(r&quot;DECISION:\n(.*?)(?=\nREFLECTION:|\Z)&quot;, re.DOTALL)
+    _REFLECTION_RE = re.compile(r&quot;REFLECTION:\n(.*?)$&quot;, re.DOTALL)
+
+    def __init__(self, config: MemoryConfig, log_path: Optional[str] = None):
+        super().__init__(config)
+        self._log_path = Path(log_path).expanduser() if log_path else None
+        if self._log_path:
+            self._log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # --- Encode ---
+
+    def encode(self, decision_text: str, ticker: str, date: str,
+               rating: Optional[str] = None) -&gt; MemoryEntry:
+        if rating is None:
+            rating = parse_rating(decision_text)
+        return MemoryEntry(
+            date=date,
+            ticker=ticker,
+            rating=rating,
+            decision=decision_text.strip(),
+            pending=True,
+        )
+
+    # --- Store ---
+
+    def store(self, entry: MemoryEntry) -&gt; bool:
+        if not self._log_path:
+            return False
+
+        # Idempotency guard
+        if self._log_path.exists():
+            raw = self._log_path.read_text(encoding=&quot;utf-8&quot;)
+            for line in raw.splitlines():
+                if line.startswith(f&quot;[{entry.date} | {entry.ticker} |&quot;) and line.endswith(&quot;| pending]&quot;):
+                    return True  # Already stored
+
+        tag = f&quot;[{entry.date} | {entry.ticker} | {entry.rating} | pending]&quot;
+        block = f&quot;{tag}\n\nDECISION:\n{entry.decision}{self._SEPARATOR}&quot;
+
+        with open(self._log_path, &quot;a&quot;, encoding=&quot;utf-8&quot;) as f:
+            f.write(block)
+        return True
+
+    # --- Retrieve ---
+
+    def retrieve(self, request: MemoryRequest) -&gt; MemoryResponse:
+        start = time.time()
+        entries = self._load_entries()
+        resolved = [e for e in entries if not e.pending]
+
+        if not resolved:
+            return MemoryResponse(context=&quot;&quot;, entries=[], total_available=len(entries))
+
+        same, cross = [], []
+        for e in reversed(resolved):
+            if len(same) &gt;= request.n_same and len(cross) &gt;= request.n_cross:
+                break
+            if e.ticker == request.ticker and len(same) &lt; request.n_same:
+                same.append(e)
+            elif e.ticker != request.ticker and len(cross) &lt; request.n_cross:
+                cross.append(e)
+
+        context = self._format_context(request.ticker, same, cross)
+        elapsed = (time.time() - start) * 1000
+
+        return MemoryResponse(
+            context=context,
+            entries=same + cross,
+            total_available=len(entries),
+            retrieval_time_ms=elapsed,
+        )
+
+    # --- Manage ---
+
+    def manage(self) -&gt; Dict[str, Any]:
+        entries = self._load_entries()
+        resolved = [e for e in entries if not e.pending]
+        pending = [e for e in entries if e.pending]
+
+        max_entries = self.config.rotation_max_entries
+        pruned = 0
+        if max_entries and len(resolved) &gt; max_entries:
+            pruned = len(resolved) - max_entries
+            self._rotate(max_entries)
+
+        return {
+            &quot;total_entries&quot;: len(entries),
+            &quot;resolved&quot;: len(resolved),
+            &quot;pending&quot;: len(pending),
+            &quot;pruned&quot;: pruned,
+            &quot;file_size_kb&quot;: self._log_path.stat().st_size / 1024 if self._log_path and self._log_path.exists() else 0,
+        }
+
+    # --- Helpers (ported from TradingMemoryLog) ---
+
+    def _load_entries(self) -&gt; List[MemoryEntry]:
+        if not self._log_path or not self._log_path.exists():
+            return []
+        text = self._log_path.read_text(encoding=&quot;utf-8&quot;)
+        raw_entries = [e.strip() for e in text.split(self._SEPARATOR) if e.strip()]
+        entries = []
+        for raw in raw_entries:
+            entry = self._parse_entry(raw)
+            if entry:
+                entries.append(entry)
+        return entries
+
+    def _parse_entry(self, raw: str) -&gt; Optional[MemoryEntry]:
+        lines = raw.strip().splitlines()
+        if not lines:
+            return None
+        tag_line = lines[0].strip()
+        if not (tag_line.startswith(&quot;[&quot;) and tag_line.endswith(&quot;]&quot;)):
+            return None
+        fields = [f.strip() for f in tag_line[1:-1].split(&quot;|&quot;)]
+        if len(fields) &lt; 4:
+            return None
+        body = &quot;\n&quot;.join(lines[1:]).strip()
+        decision_match = self._DECISION_RE.search(body)
+        reflection_match = self._REFLECTION_RE.search(body)
+        return MemoryEntry(
+            date=fields[0],
+            ticker=fields[1],
+            rating=fields[2],
+            pending=(fields[3] == &quot;pending&quot;),
+            raw_return=float(fields[4].strip().replace(&quot;%&quot;, &quot;&quot;)) / 100 if len(fields) &gt; 4 and fields[4].strip() != &quot;n/a&quot; else None,
+            alpha_return=float(fields[5].strip().replace(&quot;%&quot;, &quot;&quot;)) / 100 if len(fields) &gt; 5 and fields[5].strip() != &quot;n/a&quot; else None,
+            holding_days=int(fields[6].replace(&quot;d&quot;, &quot;&quot;)) if len(fields) &gt; 6 and fields[6].strip() != &quot;n/a&quot; else None,
+            decision=decision_match.group(1).strip() if decision_match else &quot;&quot;,
+            reflection=reflection_match.group(1).strip() if reflection_match else &quot;&quot;,
+        )
+
+    def _format_context(self, ticker: str, same: List[MemoryEntry], cross: List[MemoryEntry]) -&gt; str:
+        parts = []
+        if same:
+            parts.append(f&quot;Past analyses of {ticker} (most recent first):&quot;)
+            for e in same:
+                parts.append(self._format_full(e))
+        if cross:
+            parts.append(&quot;Recent cross-ticker lessons:&quot;)
+            for e in cross:
+                parts.append(self._format_reflection_only(e))
+        return &quot;\n\n&quot;.join(parts)
+
+    def _format_full(self, e: MemoryEntry) -&gt; str:
+        raw = f&quot;{e.raw_return:+.1%}&quot; if e.raw_return else &quot;n/a&quot;
+        alpha = f&quot;{e.alpha_return:+.1%}&quot; if e.alpha_return else &quot;n/a&quot;
+        holding = f&quot;{e.holding_days}d&quot; if e.holding_days else &quot;n/a&quot;
+        tag = f&quot;[{e.date} | {e.ticker} | {e.rating} | {raw} | {alpha} | {holding}]&quot;
+        parts = [tag, f&quot;DECISION:\n{e.decision}&quot;]
+        if e.reflection:
+            parts.append(f&quot;REFLECTION:\n{e.reflection}&quot;)
+        return &quot;\n\n&quot;.join(parts)
+
+    def _format_reflection_only(self, e: MemoryEntry) -&gt; str:
+        raw = f&quot;{e.raw_return:+.1%}&quot; if e.raw_return else &quot;n/a&quot;
+        tag = f&quot;[{e.date} | {e.ticker} | {e.rating} | {raw}]&quot;
+        if e.reflection:
+            return f&quot;{tag}\n{e.reflection}&quot;
+        text = e.decision[:300]
+        suffix = &quot;...&quot; if len(e.decision) &gt; 300 else &quot;&quot;
+        return f&quot;{tag}\n{text}{suffix}&quot;
+
+    def _rotate(self, max_entries: int) -&gt; None:
+        &quot;&quot;&quot;Drop oldest resolved entries, keep all pending.&quot;&quot;&quot;
+        if not self._log_path or not self._log_path.exists():
+            return
+        text = self._log_path.read_text(encoding=&quot;utf-8&quot;)
+        blocks = text.split(self._SEPARATOR)
+        decisions = []
+        for block in blocks:
+            stripped = block.strip()
+            if not stripped:
+                decisions.append((block, False))
+                continue
+            tag_line = stripped.splitlines()[0].strip()
+            is_resolved = tag_line.startswith(&quot;[&quot;) and tag_line.endswith(&quot;]&quot;) and not tag_line.endswith(&quot;| pending]&quot;)
+            decisions.append((block, is_resolved))
+        resolved_count = sum(1 for _, r in decisions if r)
+        if resolved_count &lt;= max_entries:
+            return
+        to_drop = resolved_count - max_entries
+        kept = []
+        for block, is_resolved in decisions:
+            if is_resolved and to_drop &gt; 0:
+                to_drop -= 1
+                continue
+            kept.append(block)
+        new_text = self._SEPARATOR.join(kept)
+        tmp = self._log_path.with_suffix(&quot;.tmp&quot;)
+        tmp.write_text(new_text, encoding=&quot;utf-8&quot;)
+        tmp.replace(self._log_path)
+
+    def update_entry(self, entry: MemoryEntry, reflection: str) -&gt; bool:
+        &quot;&quot;&quot;Resolve a pending entry with outcome and reflection.&quot;&quot;&quot;
+        if not self._log_path or not self._log_path.exists():
+            return False
+        text = self._log_path.read_text(encoding=&quot;utf-8&quot;)
+        blocks = text.split(self._SEPARATOR)
+        pending_prefix = f&quot;[{entry.date} | {entry.ticker} |&quot;
+        raw_pct = f&quot;{entry.raw_return:+.1%}&quot; if entry.raw_return else &quot;n/a&quot;
+        alpha_pct = f&quot;{entry.alpha_return:+.1%}&quot; if entry.alpha_return else &quot;n/a&quot;
+        holding = f&quot;{entry.holding_days}d&quot; if entry.holding_days else &quot;n/a&quot;
+        new_tag = f&quot;[{entry.date} | {entry.ticker} | {entry.rating} | {raw_pct} | {alpha_pct} | {holding}]&quot;
+        updated = False
+        new_blocks = []
+        for block in blocks:
+            stripped = block.strip()
+            if not stripped:
+                new_blocks.append(block)
+                continue
+            lines = stripped.splitlines()
+            tag_line = lines[0].strip()
+            if tag_line.startswith(pending_prefix) and tag_line.endswith(&quot;| pending]&quot;):
+                rest = &quot;\n&quot;.join(lines[1:])
+                new_blocks.append(f&quot;{new_tag}\n\n{rest.lstrip()}\n\nREFLECTION:\n{reflection}&quot;)
+                updated = True
+            else:
+                new_blocks.append(block)
+        if not updated:
+            return False
+        # Apply rotation
+        max_entries = self.config.rotation_max_entries
+        if max_entries:
+            new_blocks = self._rotate_blocks(new_blocks, max_entries)
+        new_text = self._SEPARATOR.join(new_blocks)
+        tmp = self._log_path.with_suffix(&quot;.tmp&quot;)
+        tmp.write_text(new_text, encoding=&quot;utf-8&quot;)
+        tmp.replace(self._log_path)
+        return True
+
+    def _rotate_blocks(self, blocks: List[str], max_entries: int) -&gt; List[str]:
+        decisions = []
+        for block in blocks:
+            stripped = block.strip()
+            if not stripped:
+                decisions.append((block, False))
+                continue
+            tag_line = stripped.splitlines()[0].strip()
+            is_resolved = tag_line.startswith(&quot;[&quot;) and tag_line.endswith(&quot;]&quot;) and not tag_line.endswith(&quot;| pending]&quot;)
+            decisions.append((block, is_resolved))
+        resolved_count = sum(1 for _, r in decisions if r)
+        if resolved_count &lt;= max_entries:
+            return blocks
+        to_drop = resolved_count - max_entries
+        kept = []
+        for block, is_resolved in decisions:
+            if is_resolved and to_drop &gt; 0:
+                to_drop -= 1
+                continue
+            kept.append(block)
+        return kept
+</code></pre>
+<h3 id="43-update-tradingagentsgraph">4.3 Update TradingAgentsGraph</h3>
+<p><strong>File:</strong> <code>tradingagents/graph/trading_graph.py</code> — modifications</p>
+<pre><code class="language-python"># Replace existing imports:
+# from tradingagents.agents.utils.memory import TradingMemoryLog
+# With:
+from tradingagents.memory.provider import MemoryConfig
+from tradingagents.memory.file_provider import FileMemoryProvider
+
+# In __init__():
+# Replace:
+#   self.memory_log = TradingMemoryLog(self.config)
+# With:
+memory_log_path = self.config.get(&quot;memory_log_path&quot;)
+memory_config = MemoryConfig(
+    rotation_max_entries=self.config.get(&quot;memory_log_max_entries&quot;),
+)
+self.memory_provider = FileMemoryProvider(memory_config, log_path=memory_log_path)
+
+# Backward compat alias (for gradual migration):
+self.memory_log = self.memory_provider  # Enables drop-in replacement
+
+# In _run_graph():
+# Replace:
+#   past_context = self.memory_log.get_past_context(company_name)
+# With:
+from tradingagents.memory.provider import MemoryRequest
+request = MemoryRequest(ticker=company_name, trade_date=str(trade_date))
+response = self.memory_provider.retrieve(request)
+past_context = response.context
+
+# In propagate():
+# Replace:
+#   self.memory_log.store_decision(...)
+# With:
+entry = self.memory_provider.encode(final_trade_decision, company_name, str(trade_date))
+self.memory_provider.store(entry)
+
+# In _resolve_pending_entries():
+# Replace batch_update_with_outcomes with:
+for upd in updates:
+    entry = MemoryEntry(
+        date=upd[&quot;trade_date&quot;],
+        ticker=upd[&quot;ticker&quot;],
+        rating=...,  # parse from stored entry
+        decision=...,
+        raw_return=upd[&quot;raw_return&quot;],
+        alpha_return=upd[&quot;alpha_return&quot;],
+        holding_days=upd[&quot;holding_days&quot;],
+        pending=False,
+    )
+    self.memory_provider.update_entry(entry, upd[&quot;reflection&quot;])
+</code></pre>
+<h3 id="44-backward-compatibility-layer">4.4 Backward Compatibility Layer</h3>
+<p><strong>File:</strong> <code>tradingagents/agents/utils/memory.py</code> — updated</p>
+<pre><code class="language-python">&quot;&quot;&quot;TradingMemoryLog — deprecated, wraps FileMemoryProvider for backward compat.&quot;&quot;&quot;
+
+from tradingagents.memory.provider import MemoryConfig, MemoryRequest
+from tradingagents.memory.file_provider import FileMemoryProvider
+
+
+class TradingMemoryLog:
+    &quot;&quot;&quot;Deprecated: use FileMemoryProvider directly.
+
+    This class wraps FileMemoryProvider to maintain API compatibility
+    with existing code during the migration period.
+    &quot;&quot;&quot;
+
+    def __init__(self, config: dict = None):
+        cfg = config or {}
+        memory_config = MemoryConfig(
+            rotation_max_entries=cfg.get(&quot;memory_log_max_entries&quot;),
+        )
+        self._provider = FileMemoryProvider(memory_config, log_path=cfg.get(&quot;memory_log_path&quot;))
+
+    def store_decision(self, ticker, trade_date, final_trade_decision):
+        entry = self._provider.encode(final_trade_decision, ticker, trade_date)
+        self._provider.store(entry)
+
+    def load_entries(self):
+        return self._provider._load_entries()
+
+    def get_pending_entries(self):
+        return [e for e in self._provider._load_entries() if e.pending]
+
+    def get_past_context(self, ticker, n_same=5, n_cross=3):
+        request = MemoryRequest(ticker=ticker, n_same=n_same, n_cross=n_cross)
+        return self._provider.retrieve(request).context
+
+    def update_with_outcome(self, ticker, trade_date, raw_return, alpha_return, holding_days, reflection):
+        entries = self._provider._load_entries()
+        for e in entries:
+            if e.date == trade_date and e.ticker == ticker and e.pending:
+                e.raw_return = raw_return
+                e.alpha_return = alpha_return
+                e.holding_days = holding_days
+                e.pending = False
+                self._provider.update_entry(e, reflection)
+                break
+
+    def batch_update_with_outcomes(self, updates):
+        for upd in updates:
+            self.update_with_outcome(
+                upd[&quot;ticker&quot;], upd[&quot;trade_date&quot;],
+                upd[&quot;raw_return&quot;], upd[&quot;alpha_return&quot;],
+                upd[&quot;holding_days&quot;], upd[&quot;reflection&quot;],
+            )
+</code></pre>
+<h3 id="45-phase-1-deliverables-checklist">4.5 Phase 1 Deliverables Checklist</h3>
+<ul>
+<li>[ ] <code>tradingagents/memory/__init__.py</code> — exports</li>
+<li>[ ] <code>tradingagents/memory/provider.py</code> — protocol + dataclasses</li>
+<li>[ ] <code>tradingagents/memory/file_provider.py</code> — current behavior wrapper</li>
+<li>[ ] <code>tradingagents/agents/utils/memory.py</code> — backward compat layer</li>
+<li>[ ] <code>tradingagents/graph/trading_graph.py</code> — provider injection</li>
+<li>[ ] All existing tests pass unchanged</li>
+<li>[ ] No behavioral change from current system</li>
+</ul>
+<hr />
+<h2 id="5-phase-2-effectiveness-tracking">5. Phase 2: Effectiveness Tracking</h2>
+<p><strong>Timeline:</strong> Week 2
+<strong>Goal:</strong> Track whether retrieved memory actually influences PM decisions.</p>
+<h3 id="51-memory-effectiveness-analyzer">5.1 Memory Effectiveness Analyzer</h3>
+<p><strong>File:</strong> <code>tradingagents/memory/analyzer.py</code></p>
+<pre><code class="language-python">&quot;&quot;&quot;Analyzes whether memory context influences Portfolio Manager decisions.&quot;&quot;&quot;
+
+from __future__ import annotations
+
+import re
+import json
+from pathlib import Path
+from datetime import datetime
+from typing import List, Optional, Dict, Any
+from dataclasses import asdict
+
+from .provider import MemoryEntry, EvolutionFeedback
+
+
+class MemoryEffectivenessAnalyzer:
+    &quot;&quot;&quot;Diagnoses whether past_context influenced the PM decision.
+
+    Computes an effectiveness score (0.0 - 1.0) based on:
+    1. Ticker reference overlap: does PM mention tickers from memory?
+    2. Rating alignment: does PM rating match historically successful patterns?
+    3. Reflection adoption: does PM language echo past reflections?
+    4. Context utilization: is the injected context length proportional to decision detail?
+    &quot;&quot;&quot;
+
+    def __init__(self, feedback_log_path: Optional[str] = None):
+        self._log_path = Path(feedback_log_path) if feedback_log_path else None
+        if self._log_path:
+            self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._run_counter = 0
+
+    def analyze(self, past_context: str, pm_decision: str,
+                historical_entries: List[MemoryEntry],
+                ticker: str, trade_date: str,
+                rating: str) -&gt; EvolutionFeedback:
+        &quot;&quot;&quot;Run effectiveness analysis after PM decision.&quot;&quot;&quot;
+        self._run_counter += 1
+        run_id = f&quot;run_{self._run_counter:04d}&quot;
+
+        # 1. Ticker reference overlap
+        referenced_tickers = self._extract_tickers(pm_decision)
+        memory_tickers = {e.ticker for e in historical_entries}
+        ticker_overlap = referenced_tickers &amp; memory_tickers
+        ticker_score = min(len(ticker_overlap) / max(len(memory_tickers), 1), 1.0)
+
+        # 2. Rating alignment with successful patterns
+        successful_ratings = self._get_successful_rating_distribution(historical_entries)
+        rating_score = self._compute_rating_alignment(rating, successful_ratings)
+
+        # 3. Reflection adoption (keyword overlap with past reflections)
+        reflection_keywords = self._extract_reflection_keywords(historical_entries)
+        reflection_score = self._compute_reflection_adoption(pm_decision, reflection_keywords)
+
+        # 4. Composite effectiveness score
+        effectiveness = (
+            0.35 * ticker_score +
+            0.30 * rating_score +
+            0.35 * reflection_score
+        )
+
+        feedback = EvolutionFeedback(
+            run_id=run_id,
+            ticker=ticker,
+            trade_date=trade_date,
+            decision=pm_decision,
+            rating=rating,
+            memory_injected=bool(past_context),
+            memory_context_length=len(past_context),
+            outcome_known=False,
+            decision_matches_memory_pattern=bool(ticker_overlap or reflection_score &gt; 0.3),
+            effectiveness_score=round(effectiveness, 3),
+        )
+
+        # Persist to sidecar file
+        self._log_feedback(feedback)
+
+        return feedback
+
+    def update_with_outcome(self, run_id: str, raw_return: float,
+                            alpha_return: float, holding_days: int) -&gt; None:
+        &quot;&quot;&quot;Update a feedback entry with actual outcome.&quot;&quot;&quot;
+        if not self._log_path or not self._log_path.exists():
+            return
+        lines = self._log_path.read_text(encoding=&quot;utf-8&quot;).strip().splitlines()
+        new_lines = []
+        for line in lines:
+            entry = json.loads(line)
+            if entry.get(&quot;run_id&quot;) == run_id:
+                entry[&quot;outcome_known&quot;] = True
+                entry[&quot;raw_return&quot;] = raw_return
+                entry[&quot;alpha_return&quot;] = alpha_return
+                entry[&quot;holding_days&quot;] = holding_days
+            new_lines.append(json.dumps(entry))
+        self._log_path.write_text(&quot;\n&quot;.join(new_lines) + &quot;\n&quot;, encoding=&quot;utf-8&quot;)
+
+    def get_feedback_history(self, limit: int = 100) -&gt; List[EvolutionFeedback]:
+        &quot;&quot;&quot;Load recent feedback entries.&quot;&quot;&quot;
+        if not self._log_path or not self._log_path.exists():
+            return []
+        lines = self._log_path.read_text(encoding=&quot;utf-8&quot;).strip().splitlines()
+        feedbacks = []
+        for line in lines[-limit:]:
+            try:
+                data = json.loads(line)
+                fb = EvolutionFeedback(**data)
+                feedbacks.append(fb)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return feedbacks
+
+    def get_stats(self) -&gt; Dict[str, Any]:
+        &quot;&quot;&quot;Compute aggregate statistics.&quot;&quot;&quot;
+        history = self.get_feedback_history()
+        if not history:
+            return {&quot;total_runs&quot;: 0}
+        scores = [f.effectiveness_score for f in history if f.effectiveness_score is not None]
+        return {
+            &quot;total_runs&quot;: len(history),
+            &quot;avg_effectiveness&quot;: round(sum(scores) / len(scores), 3) if scores else 0,
+            &quot;min_effectiveness&quot;: round(min(scores), 3) if scores else 0,
+            &quot;max_effectiveness&quot;: round(max(scores), 3) if scores else 0,
+            &quot;runs_with_memory&quot;: sum(1 for f in history if f.memory_injected),
+            &quot;runs_matching_pattern&quot;: sum(1 for f in history if f.decision_matches_memory_pattern),
+            &quot;last_10_avg&quot;: round(sum(s for s in scores[-10:]) / min(len(scores), 10), 3) if scores else 0,
+        }
+
+    # --- Private Methods ---
+
+    def _extract_tickers(self, text: str) -&gt; set:
+        &quot;&quot;&quot;Extract ticker symbols from text (2-5 uppercase chars, optionally with .XX suffix).&quot;&quot;&quot;
+        return set(re.findall(r'\b([A-Z]{1,5}(?:\.[A-Z]{1,3})?)\b', text))
+
+    def _get_successful_rating_distribution(self, entries: List[MemoryEntry]) -&gt; Dict[str, float]:
+        &quot;&quot;&quot;Get distribution of ratings that produced positive alpha.&quot;&quot;&quot;
+        dist = {}
+        for e in entries:
+            if e.alpha_return is not None and e.alpha_return &gt; 0:
+                dist[e.rating] = dist.get(e.rating, 0) + 1
+        total = sum(dist.values())
+        if total == 0:
+            return {}
+        return {r: c / total for r, c in dist.items()}
+
+    def _compute_rating_alignment(self, current_rating: str,
+                                   successful_dist: Dict[str, float]) -&gt; float:
+        &quot;&quot;&quot;Score how well current rating aligns with historically successful patterns.&quot;&quot;&quot;
+        if not successful_dist:
+            return 0.5  # Neutral
+        return successful_dist.get(current_rating, 0.0)
+
+    def _extract_reflection_keywords(self, entries: List[MemoryEntry]) -&gt; set:
+        &quot;&quot;&quot;Extract meaningful keywords from past reflections.&quot;&quot;&quot;
+        keywords = set()
+        stop_words = {&quot;the&quot;, &quot;a&quot;, &quot;an&quot;, &quot;is&quot;, &quot;was&quot;, &quot;were&quot;, &quot;be&quot;, &quot;been&quot;, &quot;being&quot;,
+                      &quot;have&quot;, &quot;has&quot;, &quot;had&quot;, &quot;do&quot;, &quot;does&quot;, &quot;did&quot;, &quot;will&quot;, &quot;would&quot;,
+                      &quot;could&quot;, &quot;should&quot;, &quot;may&quot;, &quot;might&quot;, &quot;shall&quot;, &quot;can&quot;, &quot;need&quot;,
+                      &quot;dare&quot;, &quot;ought&quot;, &quot;used&quot;, &quot;to&quot;, &quot;of&quot;, &quot;in&quot;, &quot;for&quot;, &quot;on&quot;, &quot;with&quot;,
+                      &quot;at&quot;, &quot;by&quot;, &quot;from&quot;, &quot;as&quot;, &quot;into&quot;, &quot;through&quot;, &quot;during&quot;, &quot;before&quot;,
+                      &quot;after&quot;, &quot;above&quot;, &quot;below&quot;, &quot;between&quot;, &quot;under&quot;, &quot;again&quot;, &quot;further&quot;,
+                      &quot;then&quot;, &quot;once&quot;, &quot;and&quot;, &quot;but&quot;, &quot;or&quot;, &quot;nor&quot;, &quot;not&quot;, &quot;so&quot;, &quot;yet&quot;,
+                      &quot;both&quot;, &quot;either&quot;, &quot;neither&quot;, &quot;each&quot;, &quot;every&quot;, &quot;all&quot;, &quot;any&quot;, &quot;few&quot;,
+                      &quot;more&quot;, &quot;most&quot;, &quot;other&quot;, &quot;some&quot;, &quot;such&quot;, &quot;no&quot;, &quot;only&quot;, &quot;own&quot;,
+                      &quot;same&quot;, &quot;than&quot;, &quot;too&quot;, &quot;very&quot;, &quot;just&quot;, &quot;because&quot;, &quot;if&quot;, &quot;when&quot;,
+                      &quot;where&quot;, &quot;which&quot;, &quot;while&quot;, &quot;who&quot;, &quot;whom&quot;, &quot;this&quot;, &quot;that&quot;, &quot;these&quot;,
+                      &quot;those&quot;, &quot;i&quot;, &quot;me&quot;, &quot;my&quot;, &quot;myself&quot;, &quot;we&quot;, &quot;our&quot;, &quot;ours&quot;, &quot;ourselves&quot;,
+                      &quot;you&quot;, &quot;your&quot;, &quot;yours&quot;, &quot;yourself&quot;, &quot;yourselves&quot;, &quot;he&quot;, &quot;him&quot;, &quot;his&quot;,
+                      &quot;himself&quot;, &quot;she&quot;, &quot;her&quot;, &quot;hers&quot;, &quot;herself&quot;, &quot;it&quot;, &quot;its&quot;, &quot;itself&quot;,
+                      &quot;they&quot;, &quot;them&quot;, &quot;their&quot;, &quot;theirs&quot;, &quot;themselves&quot;, &quot;what&quot;, &quot;about&quot;}
+        for e in entries:
+            if e.reflection:
+                words = re.findall(r'\b[a-z]{4,}\b', e.reflection.lower())
+                keywords.update(w for w in words if w not in stop_words)
+        return keywords
+
+    def _compute_reflection_adoption(self, decision: str, keywords: set) -&gt; float:
+        &quot;&quot;&quot;Score how many past reflection keywords appear in current decision.&quot;&quot;&quot;
+        if not keywords:
+            return 0.5
+        decision_words = set(re.findall(r'\b[a-z]{4,}\b', decision.lower()))
+        overlap = decision_words &amp; keywords
+        return min(len(overlap) / max(len(keywords), 1), 1.0)
+
+    def _log_feedback(self, feedback: EvolutionFeedback) -&gt; None:
+        if not self._log_path:
+            return
+        data = asdict(feedback)
+        with open(self._log_path, &quot;a&quot;, encoding=&quot;utf-8&quot;) as f:
+            f.write(json.dumps(data) + &quot;\n&quot;)
+</code></pre>
+<h3 id="52-integration-in-trading-graph">5.2 Integration in Trading Graph</h3>
+<p><strong>File:</strong> <code>tradingagents/graph/trading_graph.py</code> — additions</p>
+<pre><code class="language-python"># In __init__():
+from tradingagents.memory.analyzer import MemoryEffectivenessAnalyzer
+feedback_log_path = os.path.join(
+    os.path.expanduser(&quot;~&quot;), &quot;.tradingagents&quot;, &quot;memory&quot;, &quot;effectiveness_log.jsonl&quot;
+)
+self.effectiveness_analyzer = MemoryEffectivenessAnalyzer(feedback_log_path)
+
+# In _run_graph(), after final_trade_decision is produced:
+# Extract rating from decision
+from tradingagents.agents.utils.rating import parse_rating
+rating = parse_rating(final_trade_decision)
+
+# Get historical entries for analysis
+historical_entries = self.memory_provider._load_entries()
+
+# Run effectiveness analysis
+feedback = self.effectiveness_analyzer.analyze(
+    past_context=past_context,
+    pm_decision=final_trade_decision,
+    historical_entries=historical_entries,
+    ticker=company_name,
+    trade_date=str(trade_date),
+    rating=rating,
+)
+
+# Store feedback run_id for later outcome update
+self._current_feedback_run_id = feedback.run_id
+
+# In _resolve_pending_entries(), after computing returns:
+# Update feedback with outcome
+if hasattr(self, '_current_feedback_run_id'):
+    self.effectiveness_analyzer.update_with_outcome(
+        run_id=self._current_feedback_run_id,
+        raw_return=raw,
+        alpha_return=alpha,
+        holding_days=days,
+    )
+</code></pre>
+<h3 id="53-phase-2-deliverables-checklist">5.3 Phase 2 Deliverables Checklist</h3>
+<ul>
+<li>[ ] <code>tradingagents/memory/analyzer.py</code> — effectiveness analyzer</li>
+<li>[ ] Integration in <code>trading_graph.py</code> post-PM decision</li>
+<li>[ ] Sidecar JSONL file at <code>~/.tradingagents/memory/effectiveness_log.jsonl</code></li>
+<li>[ ] Outcome update hook in <code>_resolve_pending_entries()</code></li>
+<li>[ ] Tests for analyzer scoring logic</li>
+<li>[ ] No behavioral change to existing memory system</li>
+</ul>
+<hr />
+<h2 id="6-phase-3-diagnose-and-design-evolution">6. Phase 3: Diagnose-and-Design Evolution</h2>
+<p><strong>Timeline:</strong> Week 3-4
+<strong>Goal:</strong> Implement the outer-loop evolution that adapts memory architecture based on effectiveness feedback.</p>
+<h3 id="61-evolution-engine">6.1 Evolution Engine</h3>
+<p><strong>File:</strong> <code>tradingagents/memory/evolution.py</code></p>
+<pre><code class="language-python">&quot;&quot;&quot;Diagnose-and-Design evolution engine for memory providers.&quot;&quot;&quot;
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+from dataclasses import asdict
+
+from .provider import (
+    MemoryProvider, MemoryConfig, MemoryEntry, EvolutionFeedback,
+    DiagnosisReport, MemoryComponent,
+)
+
+
+class MemoryEvolver:
+    &quot;&quot;&quot;Implements MemEvolve's Diagnose-and-Design evolution loop.
+
+    Triggered every N decisions or when effectiveness drops below threshold.
+    Uses LLM to analyze feedback history and propose architecture changes.
+    &quot;&quot;&quot;
+
+    def __init__(self, llm, provider: MemoryProvider,
+                 evolution_log_path: Optional[str] = None):
+        self.llm = llm
+        self.provider = provider
+        self._log_path = Path(evolution_log_path) if evolution_log_path else None
+        if self._log_path:
+            self._log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def should_evolve(self, feedback_history: List[EvolutionFeedback],
+                      trigger_runs: int = 20,
+                      min_effectiveness: float = 0.2) -&gt; bool:
+        &quot;&quot;&quot;Determine if evolution should be triggered.
+
+        Conditions:
+        1. Every `trigger_runs` decisions (periodic check)
+        2. If avg effectiveness of last 10 runs &lt; min_effectiveness
+        3. If context length consistently exceeds max_context_length
+        &quot;&quot;&quot;
+        if len(feedback_history) &lt; trigger_runs:
+            return False
+
+        # Periodic trigger
+        if len(feedback_history) % trigger_runs == 0:
+            return True
+
+        # Effectiveness trigger
+        recent = feedback_history[-10:]
+        recent_scores = [f.effectiveness_score for f in recent if f.effectiveness_score is not None]
+        if recent_scores and sum(recent_scores) / len(recent_scores) &lt; min_effectiveness:
+            return True
+
+        # Context bloat trigger
+        config = self.provider.get_config()
+        long_context = [f for f in recent if f.memory_context_length &gt; config.max_context_length]
+        if len(long_context) &gt; len(recent) * 0.7:
+            return True
+
+        return False
+
+    def diagnose(self, feedback_history: List[EvolutionFeedback]) -&gt; DiagnosisReport:
+        &quot;&quot;&quot;Analyze trajectory-level evidence to identify bottlenecks.
+
+        Produces a structured defect profile D(Ω) characterizing
+        architectural issues across the four memory components.
+        &quot;&quot;&quot;
+        issues = []
+        component_scores = {c: 0.5 for c in MemoryComponent}
+
+        # Gather statistics
+        total_runs = len(feedback_history)
+        scores = [f.effectiveness_score for f in feedback_history if f.effectiveness_score is not None]
+        avg_effectiveness = sum(scores) / len(scores) if scores else 0
+        recent_scores = scores[-10:] if len(scores) &gt;= 10 else scores
+        recent_avg = sum(recent_scores) / len(recent_scores) if recent_scores else 0
+
+        # Encode diagnosis
+        context_lengths = [f.memory_context_length for f in feedback_history]
+        avg_context = sum(context_lengths) / len(context_lengths) if context_lengths else 0
+        if avg_context &gt; 3000:
+            issues.append({
+                &quot;component&quot;: &quot;encode&quot;,
+                &quot;issue&quot;: &quot;Encoded entries are too verbose, diluting signal&quot;,
+                &quot;evidence&quot;: f&quot;Average context length: {avg_context:.0f} chars&quot;,
+                &quot;severity&quot;: &quot;high&quot; if avg_context &gt; 4000 else &quot;medium&quot;,
+            })
+            component_scores[MemoryComponent.ENCODE] = max(0, 1.0 - avg_context / 5000)
+
+        # Store diagnosis
+        file_size = self._get_file_size_kb()
+        if file_size &gt; 500:
+            issues.append({
+                &quot;component&quot;: &quot;store&quot;,
+                &quot;issue&quot;: &quot;Storage file is large, increasing parse latency&quot;,
+                &quot;evidence&quot;: f&quot;File size: {file_size:.0f} KB&quot;,
+                &quot;severity&quot;: &quot;medium&quot;,
+            })
+            component_scores[MemoryComponent.STORE] = max(0, 1.0 - file_size / 1000)
+
+        # Retrieve diagnosis
+        if recent_avg &lt; 0.3:
+            issues.append({
+                &quot;component&quot;: &quot;retrieve&quot;,
+                &quot;issue&quot;: &quot;PM consistently ignores memory context&quot;,
+                &quot;evidence&quot;: f&quot;Recent avg effectiveness: {recent_avg:.2f}&quot;,
+                &quot;severity&quot;: &quot;high&quot;,
+            })
+            component_scores[MemoryComponent.RETRIEVE] = recent_avg
+        elif recent_avg &lt; 0.5:
+            issues.append({
+                &quot;component&quot;: &quot;retrieve&quot;,
+                &quot;issue&quot;: &quot;Memory context has moderate influence, could be improved&quot;,
+                &quot;evidence&quot;: f&quot;Recent avg effectiveness: {recent_avg:.2f}&quot;,
+                &quot;severity&quot;: &quot;low&quot;,
+            })
+            component_scores[MemoryComponent.RETRIEVE] = recent_avg
+
+        # Manage diagnosis
+        config = self.provider.get_config()
+        if config.rotation_max_entries is None:
+            issues.append({
+                &quot;component&quot;: &quot;manage&quot;,
+                &quot;issue&quot;: &quot;No rotation configured — file will grow unbounded&quot;,
+                &quot;evidence&quot;: &quot;rotation_max_entries is None&quot;,
+                &quot;severity&quot;: &quot;low&quot;,
+            })
+            component_scores[MemoryComponent.MANAGE] = 0.3
+        else:
+            component_scores[MemoryComponent.MANAGE] = 0.7
+
+        # LLM-driven deep diagnosis
+        llm_analysis = self._llm_diagnose(feedback_history, issues, component_scores)
+
+        # Generate recommended actions
+        recommended_actions = self._generate_actions(issues, llm_analysis)
+
+        return DiagnosisReport(
+            issues=issues,
+            llm_analysis=llm_analysis,
+            component_scores=component_scores,
+            recommended_actions=recommended_actions,
+        )
+
+    def design(self, diagnosis: DiagnosisReport) -&gt; List[MemoryConfig]:
+        &quot;&quot;&quot;Generate new memory architecture variants conditioned on diagnosis.
+
+        Produces S candidate configurations by modifying permissible
+        components within the modular design space.
+        &quot;&quot;&quot;
+        current_config = self.provider.get_config()
+
+        # LLM-driven design proposal
+        llm_proposal = self._llm_design(diagnosis, current_config)
+
+        # Parse LLM output into concrete config variants
+        candidates = self._parse_proposals(llm_proposal, current_config)
+
+        # Always include current config as baseline
+        candidates.append(current_config)
+
+        return candidates
+
+    def select_best(self, candidates: List[MemoryConfig],
+                    feedback_history: List[EvolutionFeedback]) -&gt; MemoryConfig:
+        &quot;&quot;&quot;Select best configuration via Pareto-optimal ranking.
+
+        Ranks candidates on multiple objectives:
+        1. Simulated effectiveness (based on historical data)
+        2. Context cost (lower is better)
+        3. Complexity (simpler is better)
+        &quot;&quot;&quot;
+        scored = []
+        for config in candidates:
+            effectiveness = self._simulate_config(config, feedback_history)
+            context_cost = self._estimate_context_cost(config)
+            complexity = self._estimate_complexity(config)
+            scored.append({
+                &quot;config&quot;: config,
+                &quot;effectiveness&quot;: effectiveness,
+                &quot;context_cost&quot;: context_cost,
+                &quot;complexity&quot;: complexity,
+            })
+
+        # Pareto sort: prefer higher effectiveness, lower cost, lower complexity
+        scored.sort(key=lambda s: (-s[&quot;effectiveness&quot;], s[&quot;context_cost&quot;], s[&quot;complexity&quot;]))
+
+        return scored[0][&quot;config&quot;]
+
+    def apply(self, config: MemoryConfig) -&gt; bool:
+        &quot;&quot;&quot;Apply new configuration to the memory provider.&quot;&quot;&quot;
+        old_config = self.provider.get_config()
+        if config == old_config:
+            return False
+        self.provider.update_config(config)
+        self._log_evolution(old_config, config)
+        return True
+
+    # --- Private Methods ---
+
+    def _get_file_size_kb(self) -&gt; float:
+        &quot;&quot;&quot;Get current storage file size in KB.&quot;&quot;&quot;
+        provider = self.provider
+        if hasattr(provider, '_log_path') and provider._log_path and provider._log_path.exists():
+            return provider._log_path.stat().st_size / 1024
+        return 0
+
+    def _llm_diagnose(self, feedback_history: List[EvolutionFeedback],
+                      issues: List[Dict], component_scores: Dict) -&gt; str:
+        &quot;&quot;&quot;Use LLM for deep diagnosis beyond rule-based checks.&quot;&quot;&quot;
+        stats = {
+            &quot;total_runs&quot;: len(feedback_history),
+            &quot;avg_effectiveness&quot;: sum(f.effectiveness_score or 0 for f in feedback_history) / max(len(feedback_history), 1),
+            &quot;recent_10_avg&quot;: sum((f.effectiveness_score or 0) for f in feedback_history[-10:]) / min(len(feedback_history), 10),
+            &quot;avg_context_length&quot;: sum(f.memory_context_length for f in feedback_history) / max(len(feedback_history), 1),
+            &quot;memory_injection_rate&quot;: sum(1 for f in feedback_history if f.memory_injected) / max(len(feedback_history), 1),
+            &quot;pattern_match_rate&quot;: sum(1 for f in feedback_history if f.decision_matches_memory_pattern) / max(len(feedback_history), 1),
+        }
+
+        prompt = f&quot;&quot;&quot;You are a memory system architect analyzing the effectiveness of a trading agent's memory.
+
+Current Statistics:
+{json.dumps(stats, indent=2)}
+
+Detected Issues:
+{json.dumps(issues, indent=2)}
+
+Component Scores (0.0 = broken, 1.0 = optimal):
+{json.dumps({k.value: v for k, v in component_scores.items()}, indent=2)}
+
+Analyze the data and provide:
+1. Root cause analysis for the lowest-scoring component
+2. Specific architectural changes that would improve effectiveness
+3. Trade-offs between context richness and decision quality
+4. Whether the current retrieval strategy (recency-based) is optimal for this trading pattern
+
+Be concise. Focus on actionable insights.&quot;&quot;&quot;
+
+        response = self.llm.invoke([(&quot;system&quot;, &quot;You are a memory architecture expert for financial trading agents.&quot;),
+                                     (&quot;human&quot;, prompt)])
+        return response.content
+
+    def _generate_actions(self, issues: List[Dict], llm_analysis: str) -&gt; List[str]:
+        &quot;&quot;&quot;Generate prioritized action list from diagnosis.&quot;&quot;&quot;
+        actions = []
+        severity_order = {&quot;high&quot;: 0, &quot;medium&quot;: 1, &quot;low&quot;: 2}
+        sorted_issues = sorted(issues, key=lambda i: severity_order.get(i.get(&quot;severity&quot;, &quot;low&quot;), 2))
+
+        for issue in sorted_issues:
+            component = issue[&quot;component&quot;]
+            if component == &quot;encode&quot;:
+                actions.append(&quot;Reduce encoding granularity: switch from full decision to key-point summary&quot;)
+            elif component == &quot;store&quot;:
+                actions.append(&quot;Enable rotation: set max_entries to 50-100 to bound file growth&quot;)
+            elif component == &quot;retrieve&quot;:
+                actions.append(&quot;Change retrieval strategy: try rating-grouped or outcome-weighted selection&quot;)
+            elif component == &quot;manage&quot;:
+                actions.append(&quot;Configure periodic consolidation to remove redundant entries&quot;)
+
+        return actions
+
+    def _llm_design(self, diagnosis: DiagnosisReport, current_config: MemoryConfig) -&gt; str:
+        &quot;&quot;&quot;Use LLM to propose new memory configurations.&quot;&quot;&quot;
+        prompt = f&quot;&quot;&quot;You are designing an improved memory architecture for a financial trading agent.
+
+Current Configuration:
+{json.dumps(asdict(current_config), indent=2)}
+
+Diagnosis Report:
+- Issues: {json.dumps(diagnosis.issues, indent=2)}
+- LLM Analysis: {diagnosis.llm_analysis}
+- Component Scores: {json.dumps({k.value: v for k, v in diagnosis.component_scores.items()}, indent=2)}
+
+Propose 3 alternative configurations. For each, specify:
+1. provider_type: &quot;file&quot; (only option currently)
+2. n_same: int (1-10) — max same-ticker entries to retrieve
+3. n_cross: int (1-10) — max cross-ticker entries to retrieve
+4. max_context_length: int (1000-6000) — soft cap on retrieved context
+5. format_style: &quot;full&quot; | &quot;reflection_only&quot; | &quot;summary&quot;
+6. selection_strategy: &quot;recency&quot; | &quot;rating_grouped&quot; | &quot;outcome_weighted&quot;
+7. rotation_max_entries: int or null
+8. dedup_enabled: bool
+
+Return as JSON array of config objects. Each config should address at least one diagnosed issue.&quot;&quot;&quot;
+
+        response = self.llm.invoke([(&quot;system&quot;, &quot;You are a memory architecture designer. Output only valid JSON.&quot;),
+                                     (&quot;human&quot;, prompt)])
+        return response.content
+
+    def _parse_proposals(self, llm_output: str, current_config: MemoryConfig) -&gt; List[MemoryConfig]:
+        &quot;&quot;&quot;Parse LLM JSON output into MemoryConfig objects.&quot;&quot;&quot;
+        try:
+            # Extract JSON from possible markdown wrapping
+            import re
+            json_match = re.search(r'\[.*\]', llm_output, re.DOTALL)
+            if json_match:
+                proposals = json.loads(json_match.group())
+            else:
+                proposals = json.loads(llm_output)
+
+            configs = []
+            for p in proposals:
+                config = MemoryConfig(
+                    provider_type=p.get(&quot;provider_type&quot;, &quot;file&quot;),
+                    n_same=p.get(&quot;n_same&quot;, current_config.n_same),
+                    n_cross=p.get(&quot;n_cross&quot;, current_config.n_cross),
+                    max_context_length=p.get(&quot;max_context_length&quot;, current_config.max_context_length),
+                    format_style=p.get(&quot;format_style&quot;, current_config.format_style),
+                    selection_strategy=p.get(&quot;selection_strategy&quot;, current_config.selection_strategy),
+                    rotation_max_entries=p.get(&quot;rotation_max_entries&quot;, current_config.rotation_max_entries),
+                    dedup_enabled=p.get(&quot;dedup_enabled&quot;, current_config.dedup_enabled),
+                )
+                configs.append(config)
+            return configs
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return []
+
+    def _simulate_config(self, config: MemoryConfig,
+                         feedback_history: List[EvolutionFeedback]) -&gt; float:
+        &quot;&quot;&quot;Simulate effectiveness of a config on historical data.&quot;&quot;&quot;
+        # Simple simulation: weight by how well config params match historical patterns
+        score = 0.5  # Baseline
+
+        # Reward configs that would have reduced context bloat
+        avg_context = sum(f.memory_context_length for f in feedback_history) / max(len(feedback_history), 1)
+        if config.max_context_length &lt; avg_context:
+            score += 0.1  # Would have prevented bloat
+
+        # Reward configs with appropriate n_same/n_cross
+        if config.n_same &gt;= 3 and config.n_same &lt;= 7:
+            score += 0.05
+        if config.n_cross &gt;= 2 and config.n_cross &lt;= 5:
+            score += 0.05
+
+        # Reward rotation for large histories
+        if config.rotation_max_entries and config.rotation_max_entries &gt;= 20:
+            score += 0.05
+
+        return min(score, 1.0)
+
+    def _estimate_context_cost(self, config: MemoryConfig) -&gt; float:
+        &quot;&quot;&quot;Estimate context window cost of a config.&quot;&quot;&quot;
+        # Rough estimate: entries * avg_chars_per_entry
+        avg_chars = 400
+        total_chars = (config.n_same + config.n_cross) * avg_chars
+        return total_chars
+
+    def _estimate_complexity(self, config: MemoryConfig) -&gt; float:
+        &quot;&quot;&quot;Estimate implementation complexity (lower = simpler).&quot;&quot;&quot;
+        complexity = 0
+        complexity += 1 if config.selection_strategy != &quot;recency&quot; else 0
+        complexity += 1 if config.format_style != &quot;full&quot; else 0
+        complexity += 1 if config.dedup_enabled else 0
+        return complexity
+
+    def _log_evolution(self, old_config: MemoryConfig, new_config: MemoryConfig) -&gt; None:
+        &quot;&quot;&quot;Log evolution event.&quot;&quot;&quot;
+        if not self._log_path:
+            return
+        event = {
+            &quot;timestamp&quot;: datetime.now().isoformat(),
+            &quot;old_config&quot;: asdict(old_config),
+            &quot;new_config&quot;: asdict(new_config),
+            &quot;changes&quot;: {k: v for k, v in asdict(new_config).items()
+                       if v != getattr(old_config, k, None)},
+        }
+        with open(self._log_path, &quot;a&quot;, encoding=&quot;utf-8&quot;) as f:
+            f.write(json.dumps(event) + &quot;\n&quot;)
+</code></pre>
+<h3 id="62-evolution-trigger-in-trading-graph">6.2 Evolution Trigger in Trading Graph</h3>
+<p><strong>File:</strong> <code>tradingagents/graph/trading_graph.py</code> — additions</p>
+<pre><code class="language-python"># In __init__():
+from tradingagents.memory.evolution import MemoryEvolver
+evolution_log_path = os.path.join(
+    os.path.expanduser(&quot;~&quot;), &quot;.tradingagents&quot;, &quot;memory&quot;, &quot;evolution_log.jsonl&quot;
+)
+self.memory_evolver = MemoryEvolver(
+    llm=self.quick_thinking_llm,  # Or deep_think_llm for higher quality
+    provider=self.memory_provider,
+    evolution_log_path=evolution_log_path,
+)
+
+# In _run_graph(), after effectiveness analysis:
+# Check if evolution should trigger
+feedback_history = self.effectiveness_analyzer.get_feedback_history()
+evolution_config = self.config.get(&quot;memory&quot;, {})
+if evolution_config.get(&quot;evolution_enabled&quot;, False):
+    if self.memory_evolver.should_evolve(
+        feedback_history,
+        trigger_runs=evolution_config.get(&quot;evolution_trigger_runs&quot;, 20),
+        min_effectiveness=evolution_config.get(&quot;evolution_min_effectiveness&quot;, 0.2),
+    ):
+        # Run evolution
+        dry_run = evolution_config.get(&quot;dry_run&quot;, True)
+        self._run_evolution(feedback_history, dry_run=dry_run)
+
+def _run_evolution(self, feedback_history: List[EvolutionFeedback], dry_run: bool = True) -&gt; None:
+    &quot;&quot;&quot;Execute the diagnose-and-design evolution loop.&quot;&quot;&quot;
+    # 1. Diagnose
+    report = self.memory_evolver.diagnose(feedback_history)
+
+    # 2. Design
+    candidates = self.memory_evolver.design(report)
+
+    # 3. Select
+    best_config = self.memory_evolver.select_best(candidates, feedback_history)
+
+    # 4. Apply (or log if dry run)
+    if dry_run:
+        logger.info(
+            &quot;[Memory Evolution - DRY RUN] Proposed config changes: %s&quot;,
+            {k: v for k, v in asdict(best_config).items()
+             if v != getattr(self.memory_provider.get_config(), k, None)},
+        )
+    else:
+        changed = self.memory_evolver.apply(best_config)
+        if changed:
+            logger.info(&quot;[Memory Evolution] Applied new config: %s&quot;, asdict(best_config))
+</code></pre>
+<h3 id="63-phase-3-deliverables-checklist">6.3 Phase 3 Deliverables Checklist</h3>
+<ul>
+<li>[ ] <code>tradingagents/memory/evolution.py</code> — diagnose + design + select</li>
+<li>[ ] LLM prompts for diagnosis and design (embedded in evolver)</li>
+<li>[ ] Pareto selection implementation</li>
+<li>[ ] Evolution trigger logic in <code>_run_graph()</code></li>
+<li>[ ] Dry-run mode (default enabled for safety)</li>
+<li>[ ] Evolution log file at <code>~/.tradingagents/memory/evolution_log.jsonl</code></li>
+<li>[ ] Tests for evolution trigger conditions</li>
+<li>[ ] Tests for config parsing from LLM output</li>
+</ul>
+<hr />
+<h2 id="7-phase-4-advanced-memory-providers">7. Phase 4: Advanced Memory Providers</h2>
+<p><strong>Timeline:</strong> Week 5-6
+<strong>Goal:</strong> Implement evolved memory strategies inspired by MemEvolve's successful architectures.</p>
+<h3 id="71-ratinggroupedprovider">7.1 RatingGroupedProvider</h3>
+<p><strong>File:</strong> <code>tradingagents/memory/rating_grouped_provider.py</code></p>
+<pre><code class="language-python">&quot;&quot;&quot;Memory provider that groups entries by rating instead of pure recency.
+
+Inspired by MemEvolve's finding that hierarchical organization improves
+retrieval quality. Provides balanced view: entries matching current market
+signal + contrarian perspective.
+&quot;&quot;&quot;
+
+from __future__ import annotations
+
+from typing import List, Dict
+from .provider import MemoryProvider, MemoryConfig, MemoryEntry, MemoryRequest, MemoryResponse
+from .file_provider import FileMemoryProvider
+
+
+class RatingGroupedProvider(FileMemoryProvider):
+    &quot;&quot;&quot;Groups memory by rating (Buy/Sell/Hold) for smarter retrieval.&quot;&quot;&quot;
+
+    def retrieve(self, request: MemoryRequest) -&gt; MemoryResponse:
+        import time
+        start = time.time()
+        entries = self._load_entries()
+        resolved = [e for e in entries if not e.pending]
+
+        if not resolved:
+            return MemoryResponse(context=&quot;&quot;, entries=[], total_available=len(entries))
+
+        # Group by rating
+        by_rating: Dict[str, List[MemoryEntry]] = {}
+        for e in reversed(resolved):
+            by_rating.setdefault(e.rating, []).append(e)
+
+        # Determine current market signal (from most recent same-ticker entry)
+        same_ticker = [e for e in resolved if e.ticker == request.ticker]
+        current_signal = same_ticker[0].rating if same_ticker else None
+
+        # Select entries: 3 same-signal, 2 opposite-signal, 2 cross-ticker
+        selected = []
+        opposite_ratings = [r for r in [&quot;Sell&quot;, &quot;Underweight&quot;, &quot;Hold&quot;, &quot;Overweight&quot;, &quot;Buy&quot;]
+                           if r != current_signal]
+
+        # Same-signal entries
+        if current_signal and current_signal in by_rating:
+            selected.extend(by_rating[current_signal][:3])
+
+        # Opposite-signal entries (contrarian view)
+        for rating in opposite_ratings:
+            if rating in by_rating and len(selected) &lt; 5:
+                selected.extend([e for e in by_rating[rating][:1] if e.ticker == request.ticker])
+
+        # Cross-ticker entries (any rating)
+        cross = [e for e in resolved if e.ticker != request.ticker and e not in selected]
+        selected.extend(cross[:request.n_cross])
+
+        context = self._format_context_grouped(request.ticker, selected, current_signal)
+        elapsed = (time.time() - start) * 1000
+
+        return MemoryResponse(
+            context=context,
+            entries=selected,
+            total_available=len(entries),
+            retrieval_time_ms=elapsed,
+        )
+
+    def _format_context_grouped(self, ticker: str, entries: List[MemoryEntry],
+                                 current_signal: str) -&gt; str:
+        parts = []
+        if current_signal:
+            parts.append(f&quot;Past analyses of {ticker} with '{current_signal}' signal:&quot;)
+        else:
+            parts.append(f&quot;Past analyses of {ticker}:&quot;)
+
+        for e in entries[:5]:
+            parts.append(self._format_full(e))
+
+        cross = [e for e in entries if e.ticker != ticker]
+        if cross:
+            parts.append(&quot;Cross-ticker lessons:&quot;)
+            for e in cross[:self.config.n_cross]:
+                parts.append(self._format_reflection_only(e))
+
+        return &quot;\n\n&quot;.join(parts)
+</code></pre>
+<h3 id="72-outcomeweightedprovider">7.2 OutcomeWeightedProvider</h3>
+<p><strong>File:</strong> <code>tradingagents/memory/outcome_weighted_provider.py</code></p>
+<pre><code class="language-python">&quot;&quot;&quot;Memory provider that weights retrieval by historical alpha performance.
+
+High-alpha entries get priority. Includes both successful and failed
+reflections for balanced learning.
+&quot;&quot;&quot;
+
+from __future__ import annotations
+
+from typing import List
+from .provider import MemoryProvider, MemoryConfig, MemoryEntry, MemoryRequest, MemoryResponse
+from .file_provider import FileMemoryProvider
+
+
+class OutcomeWeightedProvider(FileMemoryProvider):
+    &quot;&quot;&quot;Weights memory entries by their historical alpha return.&quot;&quot;&quot;
+
+    def retrieve(self, request: MemoryRequest) -&gt; MemoryResponse:
+        import time
+        start = time.time()
+        entries = self._load_entries()
+        resolved = [e for e in entries if not e.pending]
+
+        if not resolved:
+            return MemoryResponse(context=&quot;&quot;, entries=[], total_available=len(entries))
+
+        # Score entries by |alpha_return| (absolute performance magnitude)
+        def entry_score(e: MemoryEntry) -&gt; float:
+            if e.alpha_return is None:
+                return 0.0
+            return abs(e.alpha_return)  # High magnitude = informative (win or loss)
+
+        # Separate same-ticker and cross-ticker
+        same = [e for e in resolved if e.ticker == request.ticker]
+        cross = [e for e in resolved if e.ticker != request.ticker]
+
+        # Sort by score descending
+        same.sort(key=entry_score, reverse=True)
+        cross.sort(key=entry_score, reverse=True)
+
+        # Select top entries
+        selected = same[:request.n_same] + cross[:request.n_cross]
+
+        context = self._format_context_weighted(request.ticker, selected)
+        elapsed = (time.time() - start) * 1000
+
+        return MemoryResponse(
+            context=context,
+            entries=selected,
+            total_available=len(entries),
+            retrieval_time_ms=elapsed,
+        )
+
+    def _format_context_weighted(self, ticker: str, entries: List[MemoryEntry]) -&gt; str:
+        parts = []
+        parts.append(f&quot;Past analyses of {ticker} (ranked by outcome impact):&quot;)
+
+        for e in entries:
+            alpha_str = f&quot;{e.alpha_return:+.1%}&quot; if e.alpha_return else &quot;pending&quot;
+            tag = f&quot;[{e.date} | {e.ticker} | {e.rating} | alpha: {alpha_str}]&quot;
+            parts.append(tag)
+            if e.reflection:
+                parts.append(e.reflection)
+            else:
+                parts.append(e.decision[:200] + &quot;...&quot;)
+            parts.append(&quot;&quot;)
+
+        return &quot;\n&quot;.join(parts)
+</code></pre>
+<h3 id="73-provider-factory">7.3 Provider Factory</h3>
+<p><strong>File:</strong> <code>tradingagents/memory/factory.py</code></p>
+<pre><code class="language-python">&quot;&quot;&quot;Factory for creating memory providers from config.&quot;&quot;&quot;
+
+from __future__ import annotations
+
+from typing import Optional
+from .provider import MemoryProvider, MemoryConfig
+
+
+def create_provider(config: MemoryConfig, log_path: Optional[str] = None) -&gt; MemoryProvider:
+    &quot;&quot;&quot;Create memory provider based on config.provider_type.&quot;&quot;&quot;
+    if config.provider_type == &quot;file&quot;:
+        from .file_provider import FileMemoryProvider
+        return FileMemoryProvider(config, log_path=log_path)
+    elif config.provider_type == &quot;rating_grouped&quot;:
+        from .rating_grouped_provider import RatingGroupedProvider
+        return RatingGroupedProvider(config, log_path=log_path)
+    elif config.provider_type == &quot;outcome_weighted&quot;:
+        from .outcome_weighted_provider import OutcomeWeightedProvider
+        return OutcomeWeightedProvider(config, log_path=log_path)
+    else:
+        from .file_provider import FileMemoryProvider
+        return FileMemoryProvider(config, log_path=log_path)
+</code></pre>
+<h3 id="74-phase-4-deliverables-checklist">7.4 Phase 4 Deliverables Checklist</h3>
+<ul>
+<li>[ ] <code>tradingagents/memory/rating_grouped_provider.py</code></li>
+<li>[ ] <code>tradingagents/memory/outcome_weighted_provider.py</code></li>
+<li>[ ] <code>tradingagents/memory/factory.py</code> — provider factory</li>
+<li>[ ] Provider selection in config (<code>memory.provider</code>)</li>
+<li>[ ] Benchmarking script to compare providers</li>
+<li>[ ] Tests for each provider's retrieval logic</li>
+</ul>
+<hr />
+<h2 id="8-phase-5-integration-cli-validation">8. Phase 5: Integration, CLI &amp; Validation</h2>
+<p><strong>Timeline:</strong> Week 7-8
+<strong>Goal:</strong> User-facing features, CLI commands, comprehensive testing.</p>
+<h3 id="81-cli-memory-report-command">8.1 CLI Memory Report Command</h3>
+<p><strong>File:</strong> <code>cli/memory_cmd.py</code></p>
+<pre><code class="language-python">&quot;&quot;&quot;CLI commands for memory inspection and evolution reporting.&quot;&quot;&quot;
+
+import typer
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from pathlib import Path
+import os
+import json
+
+console = Console()
+memory_app = typer.Typer(help=&quot;Memory system inspection and evolution management&quot;)
+
+
+@memory_app.command(&quot;status&quot;)
+def status():
+    &quot;&quot;&quot;Show current memory system status.&quot;&quot;&quot;
+    from tradingagents.memory.provider import MemoryConfig
+    from tradingagents.memory.file_provider import FileMemoryProvider
+
+    log_path = os.path.join(os.path.expanduser(&quot;~&quot;), &quot;.tradingagents&quot;, &quot;memory&quot;, &quot;trading_memory.md&quot;)
+    config = MemoryConfig()
+    provider = FileMemoryProvider(config, log_path=log_path)
+
+    stats = provider.manage()
+    feedback_log = os.path.join(os.path.expanduser(&quot;~&quot;), &quot;.tradingagents&quot;, &quot;memory&quot;, &quot;effectiveness_log.jsonl&quot;)
+
+    table = Table(title=&quot;Memory System Status&quot;, show_header=True)
+    table.add_column(&quot;Metric&quot;, style=&quot;cyan&quot;)
+    table.add_column(&quot;Value&quot;, style=&quot;green&quot;)
+    table.add_row(&quot;Total entries&quot;, str(stats[&quot;total_entries&quot;]))
+    table.add_row(&quot;Resolved (with outcome)&quot;, str(stats[&quot;resolved&quot;]))
+    table.add_row(&quot;Pending (awaiting outcome)&quot;, str(stats[&quot;pending&quot;]))
+    table.add_row(&quot;File size&quot;, f&quot;{stats['file_size_kb']:.1f} KB&quot;)
+    table.add_row(&quot;Provider type&quot;, config.provider_type)
+    table.add_row(&quot;Selection strategy&quot;, config.selection_strategy)
+    table.add_row(&quot;n_same / n_cross&quot;, f&quot;{config.n_same} / {config.n_cross}&quot;)
+    table.add_row(&quot;Rotation limit&quot;, str(config.rotation_max_entries or &quot;unlimited&quot;))
+
+    # Effectiveness stats
+    if Path(feedback_log).exists():
+        from tradingagents.memory.analyzer import MemoryEffectivenessAnalyzer
+        analyzer = MemoryEffectivenessAnalyzer(feedback_log)
+        eff_stats = analyzer.get_stats()
+        table.add_row(&quot;Total runs with analysis&quot;, str(eff_stats[&quot;total_runs&quot;]))
+        table.add_row(&quot;Avg effectiveness&quot;, f&quot;{eff_stats['avg_effectiveness']:.3f}&quot;)
+        table.add_row(&quot;Last 10 runs avg&quot;, f&quot;{eff_stats['last_10_avg']:.3f}&quot;)
+
+    console.print(table)
+
+
+@memory_app.command(&quot;report&quot;)
+def report():
+    &quot;&quot;&quot;Show memory evolution report.&quot;&quot;&quot;
+    evolution_log = os.path.join(os.path.expanduser(&quot;~&quot;), &quot;.tradingagents&quot;, &quot;memory&quot;, &quot;evolution_log.jsonl&quot;)
+
+    if not Path(evolution_log).exists():
+        console.print(Panel(&quot;No evolution events recorded yet.&quot;, border_style=&quot;yellow&quot;))
+        return
+
+    events = []
+    with open(evolution_log, &quot;r&quot;) as f:
+        for line in f:
+            events.append(json.loads(line))
+
+    table = Table(title=&quot;Memory Evolution History&quot;, show_header=True)
+    table.add_column(&quot;Round&quot;, style=&quot;cyan&quot;)
+    table.add_column(&quot;Timestamp&quot;, style=&quot;white&quot;)
+    table.add_column(&quot;Changes&quot;, style=&quot;green&quot;)
+
+    for i, event in enumerate(events, 1):
+        changes = &quot;, &quot;.join(f&quot;{k}: {v}&quot; for k, v in event.get(&quot;changes&quot;, {}).items())
+        table.add_row(str(i), event[&quot;timestamp&quot;][:19], changes or &quot;no changes&quot;)
+
+    console.print(table)
+
+
+@memory_app.command(&quot;entries&quot;)
+def list_entries(ticker: str = typer.Option(None, &quot;--ticker&quot;, &quot;-t&quot;),
+                 limit: int = typer.Option(10, &quot;--limit&quot;, &quot;-n&quot;)):
+    &quot;&quot;&quot;List recent memory entries.&quot;&quot;&quot;
+    from tradingagents.memory.provider import MemoryConfig
+    from tradingagents.memory.file_provider import FileMemoryProvider
+
+    log_path = os.path.join(os.path.expanduser(&quot;~&quot;), &quot;.tradingagents&quot;, &quot;memory&quot;, &quot;trading_memory.md&quot;)
+    config = MemoryConfig()
+    provider = FileMemoryProvider(config, log_path=log_path)
+
+    entries = provider._load_entries()
+    if ticker:
+        entries = [e for e in entries if e.ticker == ticker.upper()]
+
+    entries = entries[-limit:]
+
+    table = Table(title=f&quot;Recent Entries ({len(entries)} shown)&quot;, show_header=True)
+    table.add_column(&quot;Date&quot;, style=&quot;cyan&quot;)
+    table.add_column(&quot;Ticker&quot;, style=&quot;green&quot;)
+    table.add_column(&quot;Rating&quot;, style=&quot;yellow&quot;)
+    table.add_column(&quot;Alpha&quot;, style=&quot;magenta&quot;)
+    table.add_column(&quot;Status&quot;, style=&quot;white&quot;)
+
+    for e in entries:
+        alpha = f&quot;{e.alpha_return:+.1%}&quot; if e.alpha_return else &quot;—&quot;
+        status = &quot;resolved&quot; if not e.pending else &quot;pending&quot;
+        table.add_row(e.date, e.ticker, e.rating, alpha, status)
+
+    console.print(table)
+</code></pre>
+<h3 id="82-config-schema-addition">8.2 Config Schema Addition</h3>
+<p><strong>File:</strong> <code>tradingagents/default_config.py</code> — additions</p>
+<pre><code class="language-python">DEFAULT_CONFIG = {
+    # ... existing config ...
+
+    # Memory evolution configuration
+    &quot;memory&quot;: {
+        &quot;provider&quot;: &quot;file&quot;,                    # file, rating_grouped, outcome_weighted
+        &quot;evolution_enabled&quot;: False,            # Opt-in (default off for safety)
+        &quot;evolution_trigger_runs&quot;: 20,          # Check every N decisions
+        &quot;evolution_min_effectiveness&quot;: 0.2,    # Force evolve if below this
+        &quot;max_context_length&quot;: 4000,            # Soft cap for retrieved context
+        &quot;evolution_llm&quot;: None,                 # Uses deep_think_llm if None
+        &quot;dry_run&quot;: True,                       # Log proposals without applying
+        &quot;n_same&quot;: 5,                           # Default same-ticker entries
+        &quot;n_cross&quot;: 3,                          # Default cross-ticker entries
+        &quot;format_style&quot;: &quot;full&quot;,                # full, reflection_only, summary
+        &quot;selection_strategy&quot;: &quot;recency&quot;,       # recency, rating_grouped, outcome_weighted
+        &quot;rotation_max_entries&quot;: None,          # Max resolved entries (None = unlimited)
+        &quot;dedup_enabled&quot;: False,                # Enable semantic deduplication
+    },
+}
+</code></pre>
+<h3 id="83-test-suite">8.3 Test Suite</h3>
+<p><strong>File:</strong> <code>tests/test_memory_evolution.py</code></p>
+<pre><code class="language-python">&quot;&quot;&quot;Tests for memory evolution system.&quot;&quot;&quot;
+
+import pytest
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from tradingagents.memory.provider import MemoryConfig, MemoryEntry, MemoryRequest, EvolutionFeedback
+from tradingagents.memory.file_provider import FileMemoryProvider
+from tradingagents.memory.analyzer import MemoryEffectivenessAnalyzer
+from tradingagents.memory.evolution import MemoryEvolver
+
+
+# --- Fixtures ---
+
+@pytest.fixture
+def tmp_log(tmp_path):
+    return str(tmp_path / &quot;trading_memory.md&quot;)
+
+
+@pytest.fixture
+def tmp_feedback(tmp_path):
+    return str(tmp_path / &quot;effectiveness_log.jsonl&quot;)
+
+
+@pytest.fixture
+def tmp_evolution(tmp_path):
+    return str(tmp_path / &quot;evolution_log.jsonl&quot;)
+
+
+@pytest.fixture
+def provider(tmp_log):
+    config = MemoryConfig(rotation_max_entries=10)
+    return FileMemoryProvider(config, log_path=tmp_log)
+
+
+@pytest.fixture
+def analyzer(tmp_feedback):
+    return MemoryEffectivenessAnalyzer(feedback_log_path=tmp_feedback)
+
+
+# --- FileMemoryProvider Tests ---
+
+class TestFileMemoryProvider:
+    def test_encode_creates_entry(self, provider):
+        entry = provider.encode(&quot;Rating: Buy\nEnter at $190.&quot;, &quot;NVDA&quot;, &quot;2026-01-10&quot;)
+        assert entry.ticker == &quot;NVDA&quot;
+        assert entry.rating == &quot;Buy&quot;
+        assert entry.pending is True
+
+    def test_store_and_retrieve(self, provider):
+        entry = provider.encode(&quot;Rating: Buy\nBuy NVDA.&quot;, &quot;NVDA&quot;, &quot;2026-01-10&quot;)
+        provider.store(entry)
+        response = provider.retrieve(MemoryRequest(ticker=&quot;NVDA&quot;, trade_date=&quot;2026-01-11&quot;))
+        # Entry is pending, so not in context
+        assert response.context == &quot;&quot;
+
+    def test_idempotent_store(self, provider):
+        entry = provider.encode(&quot;Rating: Buy&quot;, &quot;NVDA&quot;, &quot;2026-01-10&quot;)
+        assert provider.store(entry) is True
+        assert provider.store(entry) is True  # Second call is idempotent
+
+    def test_rotation_prunes_oldest(self, tmp_log):
+        config = MemoryConfig(rotation_max_entries=3)
+        provider = FileMemoryProvider(config, log_path=tmp_log)
+        for i in range(5):
+            entry = provider.encode(f&quot;Rating: Buy {i}&quot;, &quot;NVDA&quot;, f&quot;2026-01-{i+1:02d}&quot;)
+            provider.store(entry)
+            entry.pending = False  # Simulate resolved
+            provider.update_entry(entry, f&quot;Reflection {i}&quot;)
+        stats = provider.manage()
+        assert stats[&quot;resolved&quot;] &lt;= 3
+
+
+# --- EffectivenessAnalyzer Tests ---
+
+class TestEffectivenessAnalyzer:
+    def test_analyze_returns_feedback(self, analyzer, provider):
+        feedback = analyzer.analyze(
+            past_context=&quot;Past analyses of NVDA...&quot;,
+            pm_decision=&quot;Rating: Buy\nNVDA looks strong.&quot;,
+            historical_entries=[],
+            ticker=&quot;NVDA&quot;,
+            trade_date=&quot;2026-01-10&quot;,
+            rating=&quot;Buy&quot;,
+        )
+        assert feedback.effectiveness_score is not None
+        assert 0.0 &lt;= feedback.effectiveness_score &lt;= 1.0
+
+    def test_ticker_overlap_increases_score(self, analyzer):
+        entries = [MemoryEntry(date=&quot;2026-01-01&quot;, ticker=&quot;AAPL&quot;, rating=&quot;Buy&quot;, decision=&quot;Buy AAPL&quot;, reflection=&quot;Good call&quot;, pending=False)]
+        feedback = analyzer.analyze(
+            past_context=&quot;[AAPL entry]&quot;,
+            pm_decision=&quot;Rating: Buy\nAAPL momentum continues.&quot;,
+            historical_entries=entries,
+            ticker=&quot;NVDA&quot;,
+            trade_date=&quot;2026-01-10&quot;,
+            rating=&quot;Buy&quot;,
+        )
+        assert feedback.decision_matches_memory_pattern is True
+
+    def test_feedback_persisted(self, analyzer, tmp_feedback):
+        analyzer.analyze(
+            past_context=&quot;context&quot;,
+            pm_decision=&quot;Rating: Hold&quot;,
+            historical_entries=[],
+            ticker=&quot;NVDA&quot;,
+            trade_date=&quot;2026-01-10&quot;,
+            rating=&quot;Hold&quot;,
+        )
+        assert Path(tmp_feedback).exists()
+        lines = Path(tmp_feedback).read_text().strip().splitlines()
+        assert len(lines) == 1
+        data = json.loads(lines[0])
+        assert data[&quot;ticker&quot;] == &quot;NVDA&quot;
+
+    def test_stats_computation(self, analyzer):
+        # Generate some feedback
+        for i in range(5):
+            analyzer.analyze(
+                past_context=&quot;context&quot;,
+                pm_decision=f&quot;Rating: Buy decision {i}&quot;,
+                historical_entries=[],
+                ticker=&quot;NVDA&quot;,
+                trade_date=f&quot;2026-01-{i+1:02d}&quot;,
+                rating=&quot;Buy&quot;,
+            )
+        stats = analyzer.get_stats()
+        assert stats[&quot;total_runs&quot;] == 5
+        assert &quot;avg_effectiveness&quot; in stats
+
+
+# --- MemoryEvolver Tests ---
+
+class TestMemoryEvolver:
+    def test_should_evolve_periodic(self, provider, tmp_evolution):
+        mock_llm = MagicMock()
+        evolver = MemoryEvolver(mock_llm, provider, evolution_log_path=tmp_evolution)
+
+        # Not enough feedback
+        feedback = [EvolutionFeedback(run_id=f&quot;run_{i}&quot;, ticker=&quot;NVDA&quot;, trade_date=&quot;2026-01-10&quot;,
+                                       decision=&quot;Buy&quot;, rating=&quot;Buy&quot;, memory_injected=True,
+                                       memory_context_length=1000, outcome_known=False,
+                                       effectiveness_score=0.5) for i in range(10)]
+        assert evolver.should_evolve(feedback, trigger_runs=20) is False
+
+        # Enough feedback (periodic trigger)
+        feedback = [EvolutionFeedback(run_id=f&quot;run_{i}&quot;, ticker=&quot;NVDA&quot;, trade_date=&quot;2026-01-10&quot;,
+                                       decision=&quot;Buy&quot;, rating=&quot;Buy&quot;, memory_injected=True,
+                                       memory_context_length=1000, outcome_known=False,
+                                       effectiveness_score=0.5) for i in range(20)]
+        assert evolver.should_evolve(feedback, trigger_runs=20) is True
+
+    def test_should_evolve_low_effectiveness(self, provider, tmp_evolution):
+        mock_llm = MagicMock()
+        evolver = MemoryEvolver(mock_llm, provider, evolution_log_path=tmp_evolution)
+
+        feedback = [EvolutionFeedback(run_id=f&quot;run_{i}&quot;, ticker=&quot;NVDA&quot;, trade_date=&quot;2026-01-10&quot;,
+                                       decision=&quot;Buy&quot;, rating=&quot;Buy&quot;, memory_injected=True,
+                                       memory_context_length=1000, outcome_known=False,
+                                       effectiveness_score=0.1) for i in range(15)]
+        assert evolver.should_evolve(feedback, trigger_runs=20, min_effectiveness=0.2) is True
+
+    def test_diagnose_produces_report(self, provider, tmp_evolution):
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = &quot;Analysis complete.&quot;
+        evolver = MemoryEvolver(mock_llm, provider, evolution_log_path=tmp_evolution)
+
+        feedback = [EvolutionFeedback(run_id=f&quot;run_{i}&quot;, ticker=&quot;NVDA&quot;, trade_date=&quot;2026-01-10&quot;,
+                                       decision=&quot;Buy&quot;, rating=&quot;Buy&quot;, memory_injected=True,
+                                       memory_context_length=5000, outcome_known=False,
+                                       effectiveness_score=0.15) for i in range(20)]
+        report = evolver.diagnose(feedback)
+        assert len(report.issues) &gt; 0
+        assert report.llm_analysis == &quot;Analysis complete.&quot;
+</code></pre>
+<h3 id="85-phase-5-deliverables-checklist">8.5 Phase 5 Deliverables Checklist</h3>
+<ul>
+<li>[ ] <code>cli/memory_cmd.py</code> — status, report, entries commands</li>
+<li>[ ] Integration in <code>cli/main.py</code> (add <code>memory_app</code> as sub-app)</li>
+<li>[ ] <code>tradingagents/default_config.py</code> — memory evolution config</li>
+<li>[ ] <code>tests/test_memory_evolution.py</code> — comprehensive test suite</li>
+<li>[ ] Benchmarking script: <code>scripts/benchmark_providers.py</code></li>
+<li>[ ] Documentation: update README with memory evolution features</li>
+<li>[ ] End-to-end test: run 50 decisions, verify evolution triggers and applies</li>
+</ul>
+<hr />
+<h2 id="9-file-structure">9. File Structure</h2>
+<pre><code>tradingagents/
+├── memory/                          # NEW: Memory evolution system
+│   ├── __init__.py
+│   ├── provider.py                  # MemoryProvider protocol + dataclasses
+│   ├── file_provider.py             # Current behavior (backward compat)
+│   ├── rating_grouped_provider.py   # Phase 4: Group by rating
+│   ├── outcome_weighted_provider.py # Phase 4: Weight by alpha
+│   ├── factory.py                   # Phase 4: Provider factory
+│   ├── feedback.py                  # EvolutionFeedback dataclass (in provider.py)
+│   ├── analyzer.py                  # Phase 2: Effectiveness tracking
+│   └── evolution.py                 # Phase 3: Diagnose-and-Design evolution
+├── agents/
+│   └── utils/
+│       └── memory.py                # TradingMemoryLog → backward compat wrapper
+├── graph/
+│   └── trading_graph.py             # Updated: provider injection + evolution trigger
+├── default_config.py                # Updated: memory evolution config section
+└── cli/
+    └── memory_cmd.py                # Phase 5: CLI commands
+
+tests/
+├── test_memory_log.py               # Existing tests (unchanged)
+└── test_memory_evolution.py         # Phase 5: New evolution tests
+
+scripts/
+└── benchmark_providers.py           # Phase 5: Provider comparison benchmark
+
+~/.tradingagents/memory/
+├── trading_memory.md                # Existing decision log
+├── effectiveness_log.jsonl          # Phase 2: Effectiveness feedback
+└── evolution_log.jsonl              # Phase 3: Evolution events
+</code></pre>
+<hr />
+<h2 id="10-config-schema">10. Config Schema</h2>
+<pre><code class="language-python"># Full memory config in DEFAULT_CONFIG
+&quot;memory&quot;: {
+    # Provider selection
+    &quot;provider&quot;: &quot;file&quot;,                    # file | rating_grouped | outcome_weighted
+
+    # Retrieval parameters
+    &quot;n_same&quot;: 5,                           # Max same-ticker entries (1-10)
+    &quot;n_cross&quot;: 3,                          # Max cross-ticker entries (1-10)
+    &quot;max_context_length&quot;: 4000,            # Soft cap on context chars (1000-6000)
+    &quot;format_style&quot;: &quot;full&quot;,                # full | reflection_only | summary
+    &quot;selection_strategy&quot;: &quot;recency&quot;,       # recency | rating_grouped | outcome_weighted
+
+    # Evolution settings
+    &quot;evolution_enabled&quot;: False,            # Master switch (opt-in)
+    &quot;evolution_trigger_runs&quot;: 20,          # Check every N decisions
+    &quot;evolution_min_effectiveness&quot;: 0.2,    # Force evolve below this score
+    &quot;evolution_llm&quot;: None,                 # LLM for evolution (None = deep_think_llm)
+    &quot;dry_run&quot;: True,                       # Log proposals without applying
+
+    # Management
+    &quot;rotation_max_entries&quot;: None,          # Max resolved entries (None = unlimited)
+    &quot;dedup_enabled&quot;: False,                # Enable semantic deduplication
+}
+</code></pre>
+<hr />
+<h2 id="11-migration-path">11. Migration Path</h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>User Experience</th>
+<th>Risk</th>
+<th>Rollback</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Phase 1</strong></td>
+<td>Zero change — identical behavior</td>
+<td>None</td>
+<td>Delete new files, restore old import</td>
+</tr>
+<tr>
+<td><strong>Phase 2</strong></td>
+<td>Silent tracking, writes to sidecar file</td>
+<td>None</td>
+<td>Delete <code>effectiveness_log.jsonl</code></td>
+</tr>
+<tr>
+<td><strong>Phase 3</strong></td>
+<td>Evolution runs in dry-run mode (logs only)</td>
+<td>None</td>
+<td>Set <code>dry_run: true</code> (default)</td>
+</tr>
+<tr>
+<td><strong>Phase 4</strong></td>
+<td>User selects provider via config</td>
+<td>Low</td>
+<td>Change <code>provider</code> back to <code>"file"</code></td>
+</tr>
+<tr>
+<td><strong>Phase 5</strong></td>
+<td>User enables evolution, sees CLI reports</td>
+<td>Low</td>
+<td>Set <code>evolution_enabled: false</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="gradual-rollout">Gradual Rollout</h3>
+<pre><code>Week 1-2: Deploy Phase 1-2 → All users get backward compat + silent tracking
+Week 3-4: Deploy Phase 3 → Dry-run evolution logs proposals (visible in logs)
+Week 5-6: Deploy Phase 4 → Users can experiment with new providers
+Week 7-8: Deploy Phase 5 → Full evolution active for opted-in users
+</code></pre>
+<hr />
+<h2 id="12-testing-strategy">12. Testing Strategy</h2>
+<h3 id="121-unit-tests">12.1 Unit Tests</h3>
+<table>
+<thead>
+<tr>
+<th>Test File</th>
+<th>Coverage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_memory_log.py</code></td>
+<td>Existing tests — must pass unchanged</td>
+</tr>
+<tr>
+<td><code>test_memory_evolution.py</code></td>
+<td>Provider encode/store/retrieve, analyzer scoring, evolution triggers</td>
+</tr>
+<tr>
+<td><code>test_provider_factory.py</code></td>
+<td>All provider types create correctly</td>
+</tr>
+<tr>
+<td><code>test_rating_grouped.py</code></td>
+<td>Rating grouping logic, contrarian selection</td>
+</tr>
+<tr>
+<td><code>test_outcome_weighted.py</code></td>
+<td>Alpha-weighted sorting, pending entry handling</td>
+</tr>
+</tbody>
+</table>
+<h3 id="122-integration-tests">12.2 Integration Tests</h3>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_full_cycle</code></td>
+<td>Store → retrieve → analyze → evolve → apply</td>
+</tr>
+<tr>
+<td><code>test_50_decisions</code></td>
+<td>Run 50 decisions, verify evolution triggers at run 20 and 40</td>
+</tr>
+<tr>
+<td><code>test_provider_switch</code></td>
+<td>Switch from file to rating_grouped, verify context changes</td>
+</tr>
+<tr>
+<td><code>test_dry_run</code></td>
+<td>Verify dry-run mode logs but doesn't modify provider</td>
+</tr>
+</tbody>
+</table>
+<h3 id="123-performance-tests">12.3 Performance Tests</h3>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Metric</th>
+<th>Threshold</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_retrieve_latency</code></td>
+<td>Time to retrieve context</td>
+<td>&lt; 50ms for 100 entries</td>
+</tr>
+<tr>
+<td><code>test_file_parse_time</code></td>
+<td>Time to parse markdown file</td>
+<td>&lt; 100ms for 500KB file</td>
+</tr>
+<tr>
+<td><code>test_evolution_cost</code></td>
+<td>LLM calls per evolution cycle</td>
+<td>≤ 2 calls (diagnose + design)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="13-risk-assessment">13. Risk Assessment</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Probability</th>
+<th>Impact</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LLM proposes invalid config</td>
+<td>Medium</td>
+<td>Low</td>
+<td>JSON validation + fallback to current config</td>
+</tr>
+<tr>
+<td>Evolution degrades performance</td>
+<td>Low</td>
+<td>High</td>
+<td>Dry-run default + effectiveness threshold gating</td>
+</tr>
+<tr>
+<td>File corruption during rotation</td>
+<td>Low</td>
+<td>High</td>
+<td>Atomic writes via <code>os.replace()</code> (existing)</td>
+</tr>
+<tr>
+<td>Context window overflow</td>
+<td>Medium</td>
+<td>Medium</td>
+<td><code>max_context_length</code> soft cap + truncation</td>
+</tr>
+<tr>
+<td>Cross-ticker pending accumulation</td>
+<td>Medium</td>
+<td>Low</td>
+<td>Same-ticker-only resolution (existing behavior)</td>
+</tr>
+<tr>
+<td>Provider switch breaks downstream</td>
+<td>Low</td>
+<td>Medium</td>
+<td>All providers conform to same protocol</td>
+</tr>
+<tr>
+<td>Effectiveness scoring is noisy</td>
+<td>High</td>
+<td>Low</td>
+<td>Composite score (3 signals) + 10-run smoothing</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="14-success-metrics">14. Success Metrics</h2>
+<h3 id="141-quantitative">14.1 Quantitative</h3>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Baseline</th>
+<th>Target</th>
+<th>Measurement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Memory effectiveness score</td>
+<td>N/A</td>
+<td>&gt; 0.5 avg</td>
+<td><code>effectiveness_log.jsonl</code></td>
+</tr>
+<tr>
+<td>Context utilization rate</td>
+<td>N/A</td>
+<td>&gt; 60% of runs reference memory</td>
+<td>Analyzer pattern match</td>
+</tr>
+<tr>
+<td>Evolution adoption</td>
+<td>N/A</td>
+<td>&gt; 50% of active users enable</td>
+<td>Config telemetry</td>
+</tr>
+<tr>
+<td>Retrieval latency</td>
+<td>~30ms (100 entries)</td>
+<td>&lt; 50ms (500 entries)</td>
+<td><code>retrieval_time_ms</code> in response</td>
+</tr>
+<tr>
+<td>File growth rate</td>
+<td>Unbounded</td>
+<td>&lt; 100KB/month with rotation</td>
+<td><code>file_size_kb</code> in manage stats</td>
+</tr>
+</tbody>
+</table>
+<h3 id="142-qualitative">14.2 Qualitative</h3>
+<table>
+<thead>
+<tr>
+<th>Criterion</th>
+<th>Success Signal</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Backward compatibility</td>
+<td>All existing tests pass, zero behavioral change in Phase 1</td>
+</tr>
+<tr>
+<td>User control</td>
+<td>Evolution is opt-in, dry-run default, easy rollback</td>
+</tr>
+<tr>
+<td>Actionable insights</td>
+<td>Evolution log shows clear before/after config changes</td>
+</tr>
+<tr>
+<td>Domain relevance</td>
+<td>Evolved configs improve alpha return or rating accuracy</td>
+</tr>
+<tr>
+<td>Cost efficiency</td>
+<td>Evolution costs ≤ 2 LLM calls per cycle</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="appendix-a-memevolve-paper-mapping">Appendix A: MemEvolve Paper Mapping</h2>
+<table>
+<thead>
+<tr>
+<th>MemEvolve Concept</th>
+<th>TradingAgents Implementation</th>
+<th>Paper Section</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Encode (E)</td>
+<td><code>MemoryProvider.encode()</code> — extracts rating, parses decision</td>
+<td>§3.2</td>
+</tr>
+<tr>
+<td>Store (U)</td>
+<td><code>MemoryProvider.store()</code> — appends to markdown file</td>
+<td>§3.2</td>
+</tr>
+<tr>
+<td>Retrieve (R)</td>
+<td><code>MemoryProvider.retrieve()</code> — configurable strategy</td>
+<td>§3.2</td>
+</tr>
+<tr>
+<td>Manage (G)</td>
+<td><code>MemoryProvider.manage()</code> — rotation, pruning</td>
+<td>§3.2</td>
+</tr>
+<tr>
+<td>Inner Loop</td>
+<td>Every run: encode → store → retrieve → manage</td>
+<td>§4.1</td>
+</tr>
+<tr>
+<td>Outer Loop</td>
+<td>Every N runs: diagnose → design → select → apply</td>
+<td>§4.1</td>
+</tr>
+<tr>
+<td>Diagnose-and-Design</td>
+<td><code>MemoryEvolver.diagnose()</code> + <code>.design()</code></td>
+<td>§4.2</td>
+</tr>
+<tr>
+<td>Pareto Selection</td>
+<td><code>MemoryEvolver.select_best()</code> — multi-objective ranking</td>
+<td>§4.2</td>
+</tr>
+<tr>
+<td>BaseMemoryProvider ABC</td>
+<td><code>MemoryProvider</code> abstract class</td>
+<td>§A.1</td>
+</tr>
+<tr>
+<td>Evolution Feedback</td>
+<td><code>EvolutionFeedback</code> dataclass + JSONL log</td>
+<td>§4.1</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="appendix-b-comparison-with-existing-memory-systems">Appendix B: Comparison with Existing Memory Systems</h2>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>Encode</th>
+<th>Store</th>
+<th>Retrieve</th>
+<th>Manage</th>
+<th>Evolves?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>TradingMemoryLog (current)</strong></td>
+<td>Rating extraction</td>
+<td>Markdown file</td>
+<td>Recency (5+3)</td>
+<td>Optional rotation</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>FileMemoryProvider (Phase 1)</strong></td>
+<td>Rating extraction</td>
+<td>Markdown file</td>
+<td>Recency (configurable)</td>
+<td>Configurable rotation</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>+ Effectiveness (Phase 2)</strong></td>
+<td>+ metadata scoring</td>
+<td>+ sidecar log</td>
+<td>+ effectiveness filter</td>
+<td>—</td>
+<td>Tracks only</td>
+</tr>
+<tr>
+<td><strong>+ Evolution (Phase 3)</strong></td>
+<td>LLM-analyzed</td>
+<td>—</td>
+<td>LLM-proposed configs</td>
+<td>Auto-tuned</td>
+<td>Yes (config)</td>
+</tr>
+<tr>
+<td><strong>RatingGrouped (Phase 4)</strong></td>
+<td>+ rating grouping</td>
+<td>Markdown file</td>
+<td>By rating signal</td>
+<td>—</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>OutcomeWeighted (Phase 4)</strong></td>
+<td>+ alpha scoring</td>
+<td>Markdown file</td>
+<td>By |alpha|</td>
+<td>—</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>MemEvolve (paper)</strong></td>
+<td>LLM-generated</td>
+<td>Vector DB / JSON / Graph</td>
+<td>Hybrid + LLM guard</td>
+<td>LLM consolidation</td>
+<td>Yes (code)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><em>Document generated: 2026-05-17</em>
+<em>Version: 1.0</em>
+<em>Status: Ready for implementation</em></p>
+</body>
+</html>
